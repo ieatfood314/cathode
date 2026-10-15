@@ -103,8 +103,9 @@ fun listSubscriptions(baseUrl: String): SubsResponse {
 
 /** Track one more channel (URL, @handle, or channel ID). */
 fun addChannel(baseUrl: String, url: String): String {
-    val body = "{\"url\":${json.encodeToString(url)}}"
-        .toRequestBody("application/json".toMediaType())
+    // Hand-rolled JSON for one string field (correctly escapes \ and ").
+    val esc = url.replace("\\", "\\\\").replace("\"", "\\\"")
+    val body = "{\"url\":\"$esc\"}".toRequestBody("application/json".toMediaType())
     baseClient().newCall(
         Request.Builder().url("$baseUrl/api/subscriptions").post(body).build()
     ).execute().use { resp ->

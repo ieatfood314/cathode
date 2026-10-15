@@ -1,22 +1,16 @@
 package com.ruminate.app.data
 
 import android.content.Context
-import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.datasource.DefaultHttpDataSource
-import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.offline.Download
-import androidx.media3.exoplayer.offline.DownloadHelper
 import androidx.media3.exoplayer.offline.DownloadManager
+import androidx.media3.exoplayer.offline.DownloadRequest
 import com.ruminate.app.player.PlayerHolder
-import java.io.IOException
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
-import kotlin.coroutines.resume
-import kotlin.coroutines.suspendCoroutine
 
 /** Phone-copy state for one video. */
 sealed interface SaveState {
@@ -89,51 +83,30 @@ object OfflineRepo {
     fun stateOf(manager: DownloadManager, videoId: String): SaveState {
         _states.value[videoId]?.let { return it }
         return runCatching {
-            val d = manager.downloadIndex.getDownload(videoId)
+            val d = manager.downloadIndex.getDownload(videoId) ?: return SaveState.NotSaved
             map(d).also { if (it == SaveState.Saved) _states.update { m -> m + (videoId to it) } }
         }.getOrDefault(SaveState.NotSaved)
     }
 
-    /** Queue a phone copy. Returns false when preparation failed (bad Wi-Fi mid-prep, etc.). */
-    suspend fun save(context: Context, videoId: String, streamUrl: String): Boolean =
-        suspendCoroutine { cont ->
-            val app = context.applicationContext
-            try {
-                val manager = PlayerHolder.getDownloadManager(app)
-                val helper = DownloadHelper.forSingleMediaItem(
-                    app,
-                    MediaItem.Builder().setUri(streamUrl)
-                        .setMimeType(MimeTypes.VIDEO_MP4).build(),
-                    DefaultRenderersFactory(app),
-                    DefaultHttpDataSource.Factory()
-                        .setConnectTimeoutMs(30_000).setReadTimeoutMs(60_000)
-                        .setAllowCrossProtocolRedirects(true),
-                )
-                helper.prepare(
-                    object : DownloadHelper.Callback {
-                        override fun onPrepared(h: DownloadHelper) {
-                            try {
-                                manager.addDownload(h.getDownloadRequest(videoId, null))
-                                cont.resume(true)
-                            } catch (e: Exception) {
-                                _states.update { it + (videoId to SaveState.Failed) }
-                                cont.resume(false)
-                            } finally {
-                                h.release()
-                            }
-                        }
-
-                        override fun onPrepareError(h: DownloadHelper, e: IOException) {
-                            _states.update { it + (videoId to SaveState.Failed) }
-                            h.release()
-                            cont.resume(false)
-                        }
-                    }
-                )
-            } catch (e: Exception) {
-                cont.resume(false)
-            }
+    /**
+     * Queue a phone copy. Progressive MP4 needs no track selection, so the
+     * request is built directly (no DownloadHelper round-trip over the
+     * network). Must run on the main thread.
+     */
+    fun save(context: Context, videoId: String, streamUrl: String): Boolean {
+        return try {
+            val manager = PlayerHolder.getDownloadManager(context.applicationContext)
+            val req = DownloadRequest.Builder(videoId, android.net.Uri.parse(streamUrl))
+                .setMimeType(MimeTypes.VIDEO_MP4)
+                .build()
+            manager.addDownload(req)
+            _states.update { it + (videoId to SaveState.Saving(0f)) }
+            true
+        } catch (e: Exception) {
+            _states.update { it + (videoId to SaveState.Failed) }
+            false
         }
+    }
 
     fun remove(manager: DownloadManager, videoId: String) {
         runCatching { manager.removeDownload(videoId) }
