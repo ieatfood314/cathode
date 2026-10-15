@@ -51,6 +51,7 @@ object OfflineRepo {
                 is StoreLocation.DefaultMovies -> saveMediaStore(context, v, streamUrl, wifiOnly)
                 is StoreLocation.CustomFolder -> saveSaf(context, loc, v, streamUrl, wifiOnly)
             }
+            true
         }.getOrDefault(false)
         if (ok) {
             _scanned.update { it + v.id }
