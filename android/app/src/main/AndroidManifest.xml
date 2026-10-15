@@ -9,14 +9,14 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- Cleartext allowed: the server lives on your LAN / tailnet (plain http
+         there); remote access uses Tailscale's own HTTPS. -->
     <application
         android:name=".RuminateApp"
         android:allowBackup="true"
         android:icon="@drawable/ic_launcher"
         android:label="Ruminate"
         android:theme="@style/Theme.Ruminate"
-        <!-- Cleartext allowed: the server lives on your LAN / tailnet (plain
-             http there); remote access uses Tailscale's own HTTPS. -->
         android:usesCleartextTraffic="true">
 
         <!-- WorkManager is initialized on-demand via RuminateApp (Configuration.Provider). -->
