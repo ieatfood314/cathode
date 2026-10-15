@@ -217,3 +217,76 @@ fun downloadResumable(
         }
     }
 }
+
+/**
+ * Same resume logic as downloadResumable, but appends to any OutputStream —
+ * used for SAF locations (SD card / USB) where there is no direct file path.
+ * existingBytes = current partial length; openSink() must open an append
+ * stream each attempt. Throws on final failure.
+ */
+fun downloadResumableStream(
+    context: Context,
+    url: String,
+    wifiOnly: Boolean,
+    existingBytes: () -> Long,
+    openSink: () -> java.io.OutputStream?,
+    onProgress: (bytesDone: Long, total: Long) -> Unit = { _, _ -> },
+    maxAttempts: Int = 8,
+    onRangeIgnored: () -> Unit = {},
+) {
+    val client = baseClient()
+    var attempt = 0
+    var backoffMs = 1_000L
+    while (true) {
+        attempt++
+        requireWifiIfEnabled(context, wifiOnly)
+        val done = existingBytes()
+        val req = Request.Builder().url(url).apply {
+            if (done > 0) header("Range", "bytes=$done-")
+        }.build()
+        try {
+            client.newCall(req).execute().use { resp ->
+                if (resp.code == 416) return // already complete
+                if (!resp.isSuccessful && resp.code != 206) {
+                    throw IllegalStateException("HTTP ${resp.code}")
+                }
+                if (done > 0 && resp.code == 200) {
+                    throw RangeIgnoredException()
+                }
+                val total = resp.header("Content-Range")
+                    ?.substringAfter("/")?.toLongOrNull()
+                    ?: resp.header("Content-Length")?.toLongOrNull()?.plus(done)
+                    ?: -1L
+                val body = resp.body ?: throw IllegalStateException("empty body")
+                val out = openSink() ?: throw IllegalStateException("cannot open download target")
+                out.use {
+                    val buf = ByteArray(64 * 1024)
+                    var count = done
+                    while (true) {
+                        requireWifiIfEnabled(context, wifiOnly)
+                        val n = body.byteStream().read(buf)
+                        if (n < 0) break
+                        it.write(buf, 0, n)
+                        count += n
+                        onProgress(count, total)
+                    }
+                }
+                return
+            }
+        } catch (e: WifiBlockedException) {
+            throw e
+        } catch (e: RangeIgnoredException) {
+            // Server ignored Range: drop the partial so the retry starts at zero.
+            runCatching { onRangeIgnored() }
+            if (attempt >= maxAttempts) throw IllegalStateException("server ignores resume")
+            Thread.sleep(backoffMs)
+            backoffMs = (backoffMs * 2).coerceAtMost(60_000L)
+        } catch (e: Exception) {
+            if (attempt >= maxAttempts) throw e
+            Thread.sleep(backoffMs)
+            backoffMs = (backoffMs * 2).coerceAtMost(60_000L)
+        }
+    }
+}
+
+private class RangeIgnoredException : IllegalStateException("server ignored Range")

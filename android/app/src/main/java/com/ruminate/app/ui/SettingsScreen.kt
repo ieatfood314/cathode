@@ -1,5 +1,7 @@
 package com.ruminate.app.ui
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -24,9 +26,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.ruminate.app.data.AppPrefs
 import com.ruminate.app.data.ServerSettings
+import com.ruminate.app.data.VideoStore
 
 /** SponsorBlock categories: id + short button label. */
 val SB_CATS = listOf(
@@ -80,6 +84,7 @@ fun SettingsScreen(
     connStatus: String?,
     testing: Boolean,
     savedSummary: String?,
+    storageLabel: String,
     onPrefs: (AppPrefs) -> Unit,
     onServer: (ServerSettings) -> Unit,
     onSaveServer: () -> Unit,
@@ -175,6 +180,12 @@ fun SettingsScreen(
             SwitchRow("Delete phone copy after watching",
                 "Frees space automatically once you mark a video watched.",
                 prefs.deleteAfterWatched) { onPrefs(prefs.copy(deleteAfterWatched = it)) }
+            StorageFolderRow(
+                storageLabel = storageLabel,
+                isCustom = prefs.storageUri.isNotBlank(),
+                onPick = { uri -> onPrefs(prefs.copy(storageUri = uri)) },
+                onReset = { onPrefs(prefs.copy(storageUri = "")) },
+            )
             if (savedSummary != null) {
                 Text(savedSummary, style = MaterialTheme.typography.bodySmall, color = Color.Gray)
                 OutlinedButton(onClick = onClearSaved) { Text("Clear saved videos") }
@@ -244,6 +255,41 @@ fun SettingsScreen(
             }
         }
         Spacer(Modifier.height(24.dp))
+    }
+}
+
+@Composable
+private fun StorageFolderRow(
+    storageLabel: String,
+    isCustom: Boolean,
+    onPick: (String) -> Unit,
+    onReset: () -> Unit,
+) {
+    val context = LocalContext.current
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) {
+            VideoStore.takeTreePermission(context, uri)
+            onPick(uri.toString())
+        }
+    }
+    Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        Text("Storage folder")
+        Text(
+            "Videos are saved as plain .mp4 files in $storageLabel — visible in any file manager, never app data.",
+            style = MaterialTheme.typography.bodySmall, color = Color.Gray,
+        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            OutlinedButton(onClick = { picker.launch(null) }) { Text("Choose folder") }
+            if (isCustom) {
+                OutlinedButton(onClick = onReset, modifier = Modifier.padding(start = 8.dp)) {
+                    Text("Use default")
+                }
+            }
+        }
+        Text(
+            "Pick internal storage, an SD card, or a USB drive.",
+            style = MaterialTheme.typography.bodySmall, color = Color.Gray,
+        )
     }
 }
 

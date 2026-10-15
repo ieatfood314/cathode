@@ -43,6 +43,7 @@ import com.ruminate.app.player.PlayerHolder
 fun PlayerScreen(
     video: Video,
     streamUrl: String,
+    savedUri: android.net.Uri?,
     saveState: SaveState,
     showSave: Boolean,
     onSave: () -> Unit,
@@ -50,24 +51,35 @@ fun PlayerScreen(
     onWatched: () -> Unit,
 ) {
     val context = LocalContext.current
-    // Playback reads through the shared offline cache: a saved video plays
-    // with zero network, and anything streamed gets cached as it plays.
-    val player = remember(streamUrl) {
-        val upstream = DefaultHttpDataSource.Factory()
-            .setConnectTimeoutMs(30_000).setReadTimeoutMs(60_000)
-            .setAllowCrossProtocolRedirects(true)
-        val sourceFactory = DefaultMediaSourceFactory(
-            CacheDataSource.Factory()
-                .setCache(PlayerHolder.getCache(context))
-                .setUpstreamDataSourceFactory(upstream)
-        )
-        ExoPlayer.Builder(context).setMediaSourceFactory(sourceFactory).build().apply {
-            setMediaItem(MediaItem.fromUri(streamUrl))
+    // Saved file plays straight from storage (zero network). Otherwise stream
+    // through the playback cache. Keyed on both so save-while-watching
+    // switches sources cleanly.
+    val player = remember(streamUrl, savedUri) {
+        if (savedUri != null) {
+            ExoPlayer.Builder(context)
+                .setMediaSourceFactory(
+                    androidx.media3.exoplayer.source.DefaultMediaSourceFactory(
+                        androidx.media3.datasource.DefaultDataSource.Factory(context)
+                    )
+                )
+                .build()
+        } else {
+            val upstream = DefaultHttpDataSource.Factory()
+                .setConnectTimeoutMs(30_000).setReadTimeoutMs(60_000)
+                .setAllowCrossProtocolRedirects(true)
+            val sourceFactory = DefaultMediaSourceFactory(
+                CacheDataSource.Factory()
+                    .setCache(PlayerHolder.getCache(context))
+                    .setUpstreamDataSourceFactory(upstream)
+            )
+            ExoPlayer.Builder(context).setMediaSourceFactory(sourceFactory).build()
+        }.apply {
+            setMediaItem(MediaItem.fromUri(savedUri ?: android.net.Uri.parse(streamUrl)))
             prepare()
             playWhenReady = true
         }
     }
-    DisposableEffect(streamUrl) {
+    DisposableEffect(streamUrl, savedUri) {
         onDispose { player.release() }
     }
 
@@ -117,7 +129,7 @@ fun PlayerScreen(
         Spacer(Modifier.height(12.dp))
         GlassCard(Modifier.fillMaxWidth()) {
             Text(
-                if (saveState is SaveState.Saved) "Playing from your phone — no network needed"
+                if (savedUri != null) "Playing the file on your phone — no network needed"
                 else "Playing from your server over Wi-Fi",
                 color = AccentTeal,
             )

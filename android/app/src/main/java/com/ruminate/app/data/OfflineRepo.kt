@@ -1,13 +1,6 @@
 package com.ruminate.app.data
 
 import android.content.Context
-import androidx.media3.common.MimeTypes
-import androidx.media3.common.util.UnstableApi
-import androidx.media3.exoplayer.offline.Download
-import androidx.media3.exoplayer.offline.DownloadManager
-import androidx.media3.exoplayer.offline.DownloadRequest
-import com.ruminate.app.player.PlayerHolder
-import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -21,126 +14,117 @@ sealed interface SaveState {
 }
 
 /**
- * Offline copies on this phone, backed by the shared Media3 cache (same files
- * the player reads, so a saved video plays with zero network).
+ * Offline copies as plain .mp4 files in a folder you choose (shared
+ * Movies/Ruminate by default; SD card / USB drive via the folder picker) —
+ * visible in any file manager, never app-private data.
  *
- * Threading: the DownloadManager is single-threaded — every call here must
- * run on the main thread (MainActivity scope / Compose callbacks qualify).
+ * Source of truth is a folder scan (video ids live in filenames), so files
+ * moved or renamed by hand are still recognized. All functions block on
+ * network/disk: call from Dispatchers.IO.
  */
-@UnstableApi
 object OfflineRepo {
     private val _states = MutableStateFlow<Map<String, SaveState>>(emptyMap())
     val states: StateFlow<Map<String, SaveState>> = _states
-    private val attached = AtomicBoolean(false)
+    private val _scanned = MutableStateFlow<Set<String>>(emptySet())
+    private val _scannedBytes = MutableStateFlow(0L)
 
-    fun attach(manager: DownloadManager) {
-        if (!attached.compareAndSet(false, true)) return
-        manager.addListener(
-            object : DownloadManager.Listener {
-                override fun onDownloadChanged(
-                    downloadManager: DownloadManager,
-                    download: Download,
-                    finalException: Exception?,
-                ) {
-                    _states.update { it + (download.request.id to map(download)) }
-                }
+    fun stateOf(videoId: String): SaveState =
+        _states.value[videoId] ?: if (videoId in _scanned.value) SaveState.Saved
+        else SaveState.NotSaved
 
-                override fun onDownloadRemoved(
-                    downloadManager: DownloadManager,
-                    download: Download,
-                ) {
-                    _states.update { it + (download.request.id to SaveState.NotSaved) }
-                }
+    /** Re-scan the folder. Returns (count, bytes). */
+    fun rescan(context: Context, loc: StoreLocation): Pair<Int, Long> {
+        val found = runCatching { VideoStore.listSaved(context, loc) }.getOrDefault(emptyList())
+        _scanned.value = found.map { it.videoId }.toSet()
+        _scannedBytes.value = found.sumOf { it.bytes }
+        return found.size to found.sumOf { it.bytes }
+    }
+
+    fun savedBytes(): Long = _scannedBytes.value
+    fun savedCount(): Int = _scanned.value.size
+
+    fun save(context: Context, loc: StoreLocation, v: Video, streamUrl: String, wifiOnly: Boolean): Boolean {
+        if (stateOf(v.id) is SaveState.Saved) return true
+        _states.update { it + (v.id to SaveState.Saving(0f)) }
+        val ok = runCatching {
+            when (loc) {
+                is StoreLocation.DefaultMovies -> saveMediaStore(context, v, streamUrl, wifiOnly)
+                is StoreLocation.CustomFolder -> saveSaf(context, loc, v, streamUrl, wifiOnly)
             }
-        )
-        // Seed already-saved videos so badges show without tapping anything.
-        runCatching {
-            val idx = manager.downloadIndex
-            val cur = idx.getDownloads()
-            try {
-                while (cur.moveToNext()) {
-                    cur.download?.let { d ->
-                        if (d.state == Download.STATE_COMPLETED) {
-                            _states.update { it + (d.request.id to SaveState.Saved) }
-                        }
-                    }
-                }
-            } finally {
-                cur.close()
-            }
+        }.getOrDefault(false)
+        if (ok) {
+            _scanned.update { it + v.id }
+            _states.update { it + (v.id to SaveState.Saved) }
+            rescan(context, loc)
+        } else {
+            _states.update { it + (v.id to SaveState.Failed) }
         }
+        return ok
     }
 
-    private fun map(d: Download): SaveState = when (d.state) {
-        Download.STATE_COMPLETED -> SaveState.Saved
-        Download.STATE_FAILED -> SaveState.Failed
-        Download.STATE_QUEUED, Download.STATE_DOWNLOADING,
-        Download.STATE_RESTARTING -> SaveState.Saving(d.percentDownloaded / 100f)
-        else -> SaveState.NotSaved
+    private fun progress(id: String): (Long, Long) -> Unit = { done, total ->
+        val f = if (total > 0) (done.toFloat() / total).coerceIn(0f, 1f) else 0f
+        _states.update { it + (id to SaveState.Saving(f)) }
     }
 
-    /** Live state, falling back to the on-disk index for videos never touched this session. */
-    fun stateOf(manager: DownloadManager, videoId: String): SaveState {
-        _states.value[videoId]?.let { return it }
-        return runCatching {
-            val d = manager.downloadIndex.getDownload(videoId) ?: return SaveState.NotSaved
-            map(d).also { if (it == SaveState.Saved) _states.update { m -> m + (videoId to it) } }
-        }.getOrDefault(SaveState.NotSaved)
-    }
-
-    /**
-     * Queue a phone copy. Progressive MP4 needs no track selection, so the
-     * request is built directly (no DownloadHelper round-trip over the
-     * network). Must run on the main thread.
-     */
-    fun save(context: Context, videoId: String, streamUrl: String): Boolean {
-        return try {
-            val manager = PlayerHolder.getDownloadManager(context.applicationContext)
-            val req = DownloadRequest.Builder(videoId, android.net.Uri.parse(streamUrl))
-                .setMimeType(MimeTypes.VIDEO_MP4)
-                .build()
-            manager.addDownload(req)
-            _states.update { it + (videoId to SaveState.Saving(0f)) }
-            true
-        } catch (e: Exception) {
-            _states.update { it + (videoId to SaveState.Failed) }
-            false
-        }
-    }
-
-    fun remove(manager: DownloadManager, videoId: String) {
-        runCatching { manager.removeDownload(videoId) }
-    }
-
-    fun clearAll(manager: DownloadManager) {
-        runCatching {
-            val cur = manager.downloadIndex.getDownloads()
-            val ids = mutableListOf<String>()
-            try {
-                while (cur.moveToNext()) {
-                    cur.download?.request?.id?.let(ids::add)
-                }
-            } finally {
-                cur.close()
-            }
-            ids.forEach { runCatching { manager.removeDownload(it) } }
-        }
-    }
-
-    fun savedBytes(): Long = runCatching {
-        PlayerHolder.cacheIfBuilt()?.cacheSpace ?: 0
-    }.getOrDefault(0)
-
-    fun savedCount(manager: DownloadManager): Int = runCatching {
-        var n = 0
-        val cur = manager.downloadIndex.getDownloads()
+    private fun saveMediaStore(context: Context, v: Video, streamUrl: String, wifiOnly: Boolean) {
+        // Partial lives in cache (resume across attempts); the finished file
+        // is published to Movies/Ruminate as one sequential copy.
+        val dest = VideoStore.scratchPart(context, v.id)
         try {
-            while (cur.moveToNext()) {
-                if (cur.download?.state == Download.STATE_COMPLETED) n++
-            }
+            downloadResumable(context, streamUrl, dest, wifiOnly, onProgress = progress(v.id))
+            VideoStore.publishToMediaStore(context, v, dest)
         } finally {
-            cur.close()
+            dest.delete()
+            java.io.File(dest.path + ".part").delete()
         }
-        n
-    }.getOrDefault(0)
+    }
+
+    private fun saveSaf(
+        context: Context, loc: StoreLocation.CustomFolder, v: Video, streamUrl: String, wifiOnly: Boolean,
+    ) {
+        val dir = VideoStore.safDir(context, loc, v)
+            ?: throw IllegalStateException("cannot open chosen folder")
+        val finalName = videoFileName(v)
+        if (dir.listFiles().any { it.name == finalName }) return // already there
+        val partName = "$finalName.part"
+        var part = dir.listFiles().firstOrNull { it.name == partName }
+            ?: dir.createFile("video/mp4", partName)
+            ?: throw IllegalStateException("cannot create file in chosen folder")
+        try {
+            downloadResumableStream(
+                context, streamUrl, wifiOnly,
+                existingBytes = { part.length() },
+                openSink = { VideoStore.openSafAppend(context, part.uri) },
+                onProgress = progress(v.id),
+                onRangeIgnored = {
+                    part.delete()
+                    part = dir.createFile("video/mp4", partName)
+                        ?: throw IllegalStateException("cannot recreate partial file")
+                },
+            )
+        } catch (e: Exception) {
+            if (e is WifiBlockedException) throw e
+            throw e
+        }
+        if (!part.renameTo(finalName)) {
+            throw IllegalStateException("could not finalize file (rename failed)")
+        }
+    }
+
+    fun remove(context: Context, loc: StoreLocation, videoId: String) {
+        runCatching { VideoStore.delete(context, loc, videoId) }
+        _scanned.update { it - videoId }
+        _states.update { it + (videoId to SaveState.NotSaved) }
+    }
+
+    fun clearAll(context: Context, loc: StoreLocation) {
+        runCatching { VideoStore.clearAll(context, loc) }
+        // Drop cache-dir partials from the default backend too.
+        val cache = context.externalCacheDir ?: context.cacheDir
+        cache.listFiles { f -> f.name.endsWith(".bin") || f.name.endsWith(".bin.part") }
+            ?.forEach { runCatching { it.delete() } }
+        rescan(context, loc)
+        _states.value = emptyMap()
+    }
 }

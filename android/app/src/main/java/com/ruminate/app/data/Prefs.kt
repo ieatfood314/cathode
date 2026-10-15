@@ -22,6 +22,8 @@ object PrefsKeys {
     val AUTO_SAVE_NEW = booleanPreferencesKey("auto_save_new") // save new arrivals when the app opens
     val AUTO_SAVE_BASELINE = longPreferencesKey("auto_save_baseline") // max published seen; 0 = not set yet
     val DELETE_AFTER_WATCHED = booleanPreferencesKey("delete_after_watched") // free the phone copy on watched
+    val STORAGE_URI = stringPreferencesKey("storage_uri") // SAF tree URI; blank = shared Movies/Ruminate
+    val LEGACY_CACHE_WIPED = booleanPreferencesKey("legacy_cache_wiped")
 }
 
 data class AppPrefs(
@@ -34,6 +36,8 @@ data class AppPrefs(
     val autoSaveNew: Boolean = true,
     val autoSaveBaseline: Long = 0,
     val deleteAfterWatched: Boolean = true,
+    val storageUri: String = "",
+    val legacyCacheWiped: Boolean = false,
 )
 
 class PrefsRepo(private val context: Context) {
@@ -48,6 +52,8 @@ class PrefsRepo(private val context: Context) {
             autoSaveNew = p[PrefsKeys.AUTO_SAVE_NEW] ?: true,
             autoSaveBaseline = p[PrefsKeys.AUTO_SAVE_BASELINE] ?: 0,
             deleteAfterWatched = p[PrefsKeys.DELETE_AFTER_WATCHED] ?: true,
+            storageUri = p[PrefsKeys.STORAGE_URI].orEmpty(),
+            legacyCacheWiped = p[PrefsKeys.LEGACY_CACHE_WIPED] ?: false,
         )
     }
 
@@ -61,6 +67,8 @@ class PrefsRepo(private val context: Context) {
             e[PrefsKeys.SAVE_ON_PHONE] = p.saveOnPhone
             e[PrefsKeys.AUTO_SAVE_NEW] = p.autoSaveNew
             e[PrefsKeys.DELETE_AFTER_WATCHED] = p.deleteAfterWatched
+            e[PrefsKeys.STORAGE_URI] = p.storageUri
+            e[PrefsKeys.LEGACY_CACHE_WIPED] = p.legacyCacheWiped
         }
     }
 
