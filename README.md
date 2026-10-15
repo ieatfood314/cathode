@@ -11,7 +11,7 @@ Inspired by [Pinchflat](https://github.com/kieraneglin/pinchflat) (auto-archive 
 ## How it works
 
 ```
-YouTube ──poll──▶ NAS (yt-dlp + SponsorBlock) ──Wi-Fi only──▶ Android app
+YouTube ──poll──▶ server (yt-dlp + SponsorBlock) ──Wi-Fi only──▶ Android app (offline copies on the phone)
   ▲                    │                                  │
   │ subscriptions      │ downloads on server link         │ streams/downloads
   │ (OPML/CSV/txt)     │ the moment videos drop          │ with Range resume
@@ -55,7 +55,7 @@ cd android && ./gradlew assembleRelease
 adb install -r app/build/outputs/apk/release/app-release.apk
 ```
 
-In the app → Settings → enter your server URL (see Tailscale below), tap **Test connection**, then tune everything in place: polling mode + interval, download quality, SponsorBlock remove/mark, retention. **Save NAS settings** pushes the lot to the server — no SSH or `.env` editing needed day to day.
+In the app → Settings → enter your server URL (see Tailscale below), tap **Test connection**, then tune everything in place: polling mode + interval, download quality, SponsorBlock buttons, retention. **Save server settings** pushes the lot to the server — no SSH or `.env` editing needed day to day. The Channels tab explains how to export your subscriptions and lets you add channels or upload the export file by hand.
 
 ## Remote access via Tailscale
 
