@@ -15,7 +15,9 @@
         android:icon="@drawable/ic_launcher"
         android:label="Ruminate"
         android:theme="@style/Theme.Ruminate"
-        android:usesCleartextTraffic="false">
+        <!-- Cleartext allowed: the server lives on your LAN / tailnet (plain
+             http there); remote access uses Tailscale's own HTTPS. -->
+        android:usesCleartextTraffic="true">
 
         <!-- WorkManager is initialized on-demand via RuminateApp (Configuration.Provider). -->
         <provider

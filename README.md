@@ -33,7 +33,10 @@ cp .env.example .env
 curl -X POST http://<your-nas>:8000/api/subscriptions/refresh
 ```
 
-Open `http://<your-nas>:8000/api/feed` — your library as JSON.
+Open `http://<your-nas>:8000/api/feed` — your library as JSON — or just open
+`http://<your-nas>:8000/` in a desktop browser for the minimal web UI
+(same library, player, and settings as the app; handy on a computer, no
+offline sync there).
 
 ### Free subscription export (no Premium)
 
@@ -91,7 +94,7 @@ Poll interval slider + server push button live in Settings; server also exposes 
 | GET | `/api/thumbs/{id}` | thumbnail |
 | GET/PUT | `/api/settings` | poll_mode, poll_interval_minutes, resolution, SponsorBlock, keep_days |
 | GET | `/api/subscriptions` | parsed inputs + indexed channels |
-| POST | `/api/subscriptions/refresh` | poll now (app calls on open) |
+| POST | `/api/subscriptions/refresh` | starts a background scan, returns immediately (app calls on open) |
 | POST | `/api/videos/{id}/watched?westra=true` | watch state |
 
 ## Privacy / self-host notes

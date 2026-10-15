@@ -22,8 +22,9 @@ import java.util.concurrent.Executors
  * restarting the file.
  */
 object PlayerHolder {
-    const val REQUIREMENTS_UNMETERED_FLAGS =
-        Requirements.NETWORK_UNMETERED or Requirements.DEVICE_IDLE
+    // Unmetered only — never cellular. (Do NOT add DEVICE_IDLE here: on
+    // modern Android it is rarely true and would stall downloads forever.)
+    const val REQUIREMENTS_UNMETERED_FLAGS = Requirements.NETWORK_UNMETERED
 
     @Volatile private var downloadManager: DownloadManager? = null
     @Volatile private var cache: SimpleCache? = null

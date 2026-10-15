@@ -62,13 +62,18 @@ def build_download_cmd(video_url: str, out_tmpl: str, archive: Path) -> list[str
     ]
 
 
-def discover_channel_videos(channel_url: str, limit: int = 10) -> list[dict]:
-    """Flat scan of a channel's latest uploads without downloading."""
+def discover_channel_videos(playlist_url: str, limit: int = 10) -> list[dict]:
+    """Flat scan of a channel's latest uploads without downloading.
+
+    Takes a full uploads-playlist URL (e.g. .../channel/UC.../videos).
+    Flat entries only carry id/title reliably — full metadata (date,
+    duration) is backfilled from the .info.json after download.
+    """
     cmd = [
         "yt-dlp", "--flat-playlist", "--no-warnings",
         "--playlist-end", str(limit),
-        "--print", "%(.{id,title,upload_date,timestamp,channel_id,channel,uploader,duration})j",
-        f"{channel_url.rstrip('/')}/videos",
+        "--print", "%(.{id,title,channel,uploader})j",
+        playlist_url,
     ]
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)

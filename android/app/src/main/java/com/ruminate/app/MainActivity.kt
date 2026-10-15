@@ -92,7 +92,13 @@ class MainActivity : ComponentActivity() {
                 LaunchedEffect(Unit) {
                     SyncWorker.runOnOpen(this@MainActivity)
                     SyncWorker.schedulePeriodic(this@MainActivity, prefs.pollIntervalMin, prefs.pollMode)
+                }
+                // (Re)load the library once the server URL is known. Without
+                // this the first launch shows an empty library: prefs load
+                // async, so the initial refresh() above runs with a blank URL.
+                LaunchedEffect(prefs.serverUrl) {
                     refresh()
+                    if (tab == 2) loadServer()
                 }
                 // Load full NAS config whenever the Settings tab opens.
                 LaunchedEffect(tab) {

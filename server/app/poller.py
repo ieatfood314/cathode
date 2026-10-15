@@ -13,6 +13,7 @@ cellular. The *app* additionally refuses to sync/stream on metered networks
 so nothing ever touches cellular data.
 """
 
+import json
 import sqlite3
 import threading
 import time
@@ -99,6 +100,28 @@ class Poller:
         finally:
             self.running_scan = False
 
+    def scan_async(self) -> dict:
+        """Trigger a scan in a background thread and return immediately.
+
+        A full scan (yt-dlp discovery + downloads) can take many minutes, far
+        longer than a phone's HTTP timeout — so the API never blocks on it.
+        The app calls this on open, then reads GET /api/feed afterwards.
+        """
+        with threading.Lock():
+            if self.running_scan:
+                return {"started": False, "reason": "already running",
+                        "last_result": self.last_result}
+            t = threading.Thread(target=self._guarded_scan, daemon=True,
+                                 name="ruminate-scan-once")
+            t.start()
+            return {"started": True, "last_result": self.last_result}
+
+    def _guarded_scan(self):
+        try:
+            self.scan_once()
+        except Exception:
+            pass
+
     def _scan_subscription(self, conn: sqlite3.Connection, sub: Subscription,
                            media_dir: Path, archive: Path) -> tuple[int, int, int]:
         channel_id = sub.channel_id
@@ -110,13 +133,20 @@ class Poller:
                 return (0, 0, 0)
         dbmod.upsert_channel(conn, channel_id, sub.source_url, title)
 
-        vids = discover_channel_videos(sub.source_url, settings.max_videos_per_channel_scan)
-        # Fall back to channel_id URL form if handle lookup returned nothing.
-        if not vids and sub.source_url != f"https://www.youtube.com/channel/{channel_id}":
-            vids = discover_channel_videos(
-                f"https://www.youtube.com/channel/{channel_id}",
-                settings.max_videos_per_channel_scan,
-            )
+        # Discover via the canonical channel URL when the id is known. (OPML
+        # entries are RSS feed URLs — appending "/videos" to those breaks
+        # discovery and costs a full yt-dlp timeout per channel per scan.)
+        candidates: list[str] = []
+        if channel_id:
+            candidates.append(f"https://www.youtube.com/channel/{channel_id}/videos")
+        src = (sub.source_url or "").rstrip("/")
+        if src and "feeds/videos.xml" not in src and src not in candidates:
+            candidates.append(f"{src}/videos" if not src.endswith("/videos") else src)
+        vids: list[dict] = []
+        for url in candidates:
+            vids = discover_channel_videos(url, settings.max_videos_per_channel_scan)
+            if vids:
+                break
         disc = down = fail = 0
         for v in vids:
             vid = v.get("id")
@@ -150,6 +180,7 @@ class Poller:
                     str(info.relative_to(media_dir)) if info else "",
                     size,
                 )
+                self._enrich_from_info(conn, vid, info)
                 down += 1
             else:
                 dbmod.mark_failed(conn, vid, err)
@@ -159,18 +190,56 @@ class Poller:
         conn.commit()
         return (disc, down, fail)
 
+    def _enrich_from_info(self, conn: sqlite3.Connection, vid: str, info: Path | None):
+        """Backfill accurate metadata from yt-dlp's .info.json.
+
+        Flat discovery only yields id/title, so without this every video has
+        published=0 (broken feed ordering) and duration=0 (blank UI).
+        """
+        if info is None or not info.exists():
+            return
+        try:
+            d = json.loads(info.read_text(encoding="utf-8"))
+        except Exception:
+            return
+        conn.execute(
+            "UPDATE videos SET title=COALESCE(NULLIF(title,''), ?), upload_date=?, "
+            "duration=?, published=?, description=? WHERE id=?",
+            (d.get("title"), d.get("upload_date"), d.get("duration") or 0,
+             d.get("timestamp") or 0, (d.get("description") or "")[:4000], vid),
+        )
+        conn.commit()
+
     def _prune(self, conn: sqlite3.Connection, media_dir: Path):
+        """Delete media files older than keep_days (0 = keep forever).
+
+        The download-archive entry is intentionally kept, so pruned videos are
+        not re-downloaded on the next scan.
+        """
         if (settings.keep_days or 0) <= 0:
             return
         cutoff = int(time.time()) - settings.keep_days * 86400
         for row in conn.execute(
-                "SELECT id, file_path FROM videos WHERE downloaded_at < ? AND downloaded_at > 0",
+                "SELECT id FROM videos WHERE status='done' "
+                "AND downloaded_at < ? AND downloaded_at > 0",
                 (cutoff,)).fetchall():
-            try:
-                base = (media_dir / (row["file_path"] or "")).with_suffix("")
-                for p in media_dir.rglob(f"{base.stem}*"):
+            vid = row["id"]
+            # YouTube ids are [A-Za-z0-9_-]; safe to glob on.
+            for p in media_dir.rglob(f"*{vid}*"):
+                try:
+                    if p.is_file():
+                        p.unlink()
+                except OSError:
                     pass
-            except Exception:
+            conn.execute(
+                "UPDATE videos SET status='pruned', file_path='', thumb_path='', "
+                "info_path='', filesize=0 WHERE id=?", (vid,))
+        conn.commit()
+        for d in media_dir.iterdir():
+            try:
+                if d.is_dir() and not any(d.iterdir()):
+                    d.rmdir()
+            except OSError:
                 pass
 
 

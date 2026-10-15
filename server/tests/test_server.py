@@ -60,3 +60,52 @@ def test_api_health():
     r = c.get("/api/health")
     assert r.status_code == 200
     assert r.json()["ok"] is True
+
+
+def _seed_video(c, file_path: str = "fake.mp4") -> str:
+    from app import db as dbmod
+    from app.config import settings
+    conn = dbmod.connect(settings.db_path)
+    conn.execute(
+        "INSERT OR REPLACE INTO videos(id,status,file_path,published) "
+        "VALUES('vid-test','done',?,1)",
+        (file_path,),
+    )
+    conn.commit()
+    conn.close()
+    return "vid-test"
+
+
+def test_stream_rejects_absolute_path():
+    from fastapi.testclient import TestClient
+    from app.main import app
+    c = TestClient(app)
+    _seed_video(c, "/etc/passwd")
+    r = c.get("/api/videos/vid-test/stream")
+    assert r.status_code == 403
+
+
+def test_stream_rejects_inverted_range():
+    from pathlib import Path as _P
+    from fastapi.testclient import TestClient
+    from app.config import settings
+    from app.main import app
+    media = _P(settings.media_dir)
+    media.mkdir(parents=True, exist_ok=True)
+    (media / "range.mp4").write_bytes(b"x" * 1000)
+    c = TestClient(app)
+    _seed_video(c, "range.mp4")
+    assert c.get("/api/videos/vid-test/stream",
+                 headers={"Range": "bytes=500-100"}).status_code == 416
+    r = c.get("/api/videos/vid-test/stream", headers={"Range": "bytes=10-19"})
+    assert r.status_code == 206 and len(r.content) == 10
+
+
+def test_refresh_returns_immediately():
+    from fastapi.testclient import TestClient
+    from app.main import app
+    c = TestClient(app)
+    r = c.post("/api/subscriptions/refresh")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is True and "started" in body

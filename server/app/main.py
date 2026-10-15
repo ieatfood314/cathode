@@ -8,13 +8,14 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 
 from . import db as dbmod
 from .config import settings
 from .poller import poller
 from .subscriptions import load_subscriptions
+from .web import PAGE as WEB_PAGE
 
 CHUNK = 1024 * 1024
 
@@ -128,8 +129,13 @@ def subscriptions():
 
 @app.post("/api/subscriptions/refresh")
 def refresh():
-    """App calls this on every cold open (and pull-to-refresh)."""
-    result = poller.scan_once()
+    """Trigger a background scan; returns immediately.
+
+    A full scan (discovery + downloads) takes minutes, far longer than a
+    phone's HTTP timeout — so this only *starts* the work. The app then reads
+    GET /api/feed (now, and on the next open/sync) for results.
+    """
+    result = poller.scan_async()
     return {"ok": True, **result}
 
 
@@ -143,7 +149,10 @@ def mark_watched(video_id: str, watched: bool = True):
 
 
 def _resolve_media(rel: str) -> Path:
-    # Guard against path traversal: stay inside media_dir.
+    # Guard against path traversal: stay inside media_dir. Note pathlib
+    # `base / rel` discards base when rel is absolute, so reject those first.
+    if not rel or Path(rel).is_absolute() or ".." in Path(rel).parts:
+        raise HTTPException(403, "bad path")
     base = Path(settings.media_dir).resolve()
     p = (base / rel).resolve()
     if p != base and base not in p.parents:
@@ -177,8 +186,8 @@ def stream(video_id: str, request: Request):
     start = int(m.group(1)) if m.group(1) else 0
     end = int(m.group(2)) if m.group(2) else size - 1
     end = min(end, size - 1)
-    if start >= size:
-        raise HTTPException(416, "range beyond file")
+    if start >= size or start > end:
+        raise HTTPException(416, "bad range")
 
     def gen():
         with open(path, "rb") as f:
@@ -211,10 +220,7 @@ def thumb(video_id: str):
     return FileResponse(path, media_type=mime or "image/jpeg")
 
 
-@app.get("/")
-def root():
-    return JSONResponse({
-        "app": "ruminate",
-        "docs": "GET /api/feed — library; POST /api/subscriptions/refresh — poll now; "
-                "GET /api/settings — polling controls",
-    })
+@app.get("/", response_class=HTMLResponse)
+def webapp():
+    """Desktop companion UI (same library + settings as the app)."""
+    return WEB_PAGE

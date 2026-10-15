@@ -6,10 +6,12 @@ subscriptions.opml (YouTube Takeout export, free) and/or channels.txt.
 
 import os
 
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="RUMINATE_")
+
     data_dir: str = "/data"
     media_dir: str = "/media"
     db_path: str = "/data/ruminate.db"
@@ -38,9 +40,6 @@ class Settings(BaseSettings):
     # HTTP server
     host: str = "0.0.0.0"
     port: int = 8000
-
-    class Config:
-        env_prefix = "RUMINATE_"
 
 
 settings = Settings()
