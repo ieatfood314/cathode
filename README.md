@@ -41,17 +41,29 @@ Open `http://<your-nas>:8000/api/feed` — your library as JSON.
 - **Takeout CSV**: [Google Takeout](https://takeout.google.com) → YouTube → Subscriptions → `subscriptions.csv` → save as `data/subscriptions.csv`.
 - **Manual**: copy channel URLs into `data/channels.txt`, one per line.
 
-## Android app
+## Android app (Obtainium)
 
 OLED black (`#000000`) + frosted glass cards, bottom-nav Library / Now playing / Settings.
 
+**Install via [Obtainium](https://apps.obtainium.imranr.dev/)** (update tracking, no store needed): add app → source GitHub → `https://github.com/ieatfood314/ruminate` — it picks up each release APK automatically. Or download the APK from the [releases page](../../releases) and install directly.
+
 ```bash
-cd android && ./gradlew assembleDebug
-./scripts/install-app.sh app/build/outputs/apk/debug/app-debug.apk
-# or: download the debug APK from GitHub Actions artifacts
+cd android && ./gradlew assembleRelease
+adb install -r app/build/outputs/apk/release/app-release.apk
 ```
 
-In the app → Settings → enter `http://<your-nas>:8000` (use your Tailscale IP on the go, still Wi-Fi-gated). Keep **Wi-Fi only ON**.
+In the app → Settings → enter your server URL (see Tailscale below), tap **Test connection**, then tune everything in place: polling mode + interval, download quality, SponsorBlock remove/mark, retention. **Save NAS settings** pushes the lot to the server — no SSH or `.env` editing needed day to day.
+
+## Remote access via Tailscale
+
+The server binds your LAN by default. To reach it from any Wi-Fi (café, work — still never cellular, see below):
+
+```bash
+# One-time: share the NAS server on your tailnet over HTTPS
+tailscale serve --bg --https=8443 http://127.0.0.1:8000
+```
+
+Then in the app → Settings → server URL `https://<your-nas>.<tailnet>.ts.net:8443` → **Test connection**. Wi-Fi-only still applies: Tailscale over Wi-Fi syncs fine; Tailscale over cellular stays paused until you're back on unmetered Wi-Fi.
 
 ### Polling controls (Settings)
 

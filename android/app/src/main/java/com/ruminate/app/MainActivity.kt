@@ -22,9 +22,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import com.ruminate.app.data.AppPrefs
 import com.ruminate.app.data.PrefsRepo
+import com.ruminate.app.data.ServerSettings
 import com.ruminate.app.data.Video
+import com.ruminate.app.data.checkHealth
 import com.ruminate.app.data.fetchFeed
+import com.ruminate.app.data.getServerSettings
 import com.ruminate.app.data.isUnmetered
+import com.ruminate.app.data.putServerSettings
 import com.ruminate.app.ui.LibraryScreen
 import com.ruminate.app.ui.PlayerScreen
 import com.ruminate.app.ui.RuminateTheme
@@ -47,7 +51,10 @@ class MainActivity : ComponentActivity() {
                 var videos by remember { mutableStateOf<List<Video>>(emptyList()) }
                 var loading by remember { mutableStateOf(false) }
                 var open: Video? by remember { mutableStateOf(null) }
-                var serverPollMode by remember { mutableStateOf("periodic") }
+                var server by remember { mutableStateOf<ServerSettings?>(null) }
+                var serverLoading by remember { mutableStateOf(false) }
+                var connStatus by remember { mutableStateOf<String?>(null) }
+                var testing by remember { mutableStateOf(false) }
                 val wifiBlocked = prefs.wifiOnly && !isUnmetered(this)
 
                 fun refresh() {
@@ -63,11 +70,32 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
+                fun loadServer() {
+                    if (prefs.serverUrl.isBlank()) return
+                    if (prefs.wifiOnly && !isUnmetered(this@MainActivity)) {
+                        connStatus = "Waiting for Wi-Fi (Wi-Fi only is ON)."
+                        return
+                    }
+                    serverLoading = true
+                    scope.launch(Dispatchers.IO) {
+                        val s = runCatching { getServerSettings(prefs.serverUrl) }.getOrNull()
+                        withContext(Dispatchers.Main) {
+                            server = s
+                            serverLoading = false
+                            if (s == null) connStatus = "Could not reach the server."
+                        }
+                    }
+                }
+
                 // Auto-download the moment the app opens: trigger NAS poll via WorkManager.
                 LaunchedEffect(Unit) {
                     SyncWorker.runOnOpen(this@MainActivity)
                     SyncWorker.schedulePeriodic(this@MainActivity, prefs.pollIntervalMin, prefs.pollMode)
                     refresh()
+                }
+                // Load full NAS config whenever the Settings tab opens.
+                LaunchedEffect(tab) {
+                    if (tab == 2) loadServer()
                 }
 
                 Scaffold(
@@ -121,7 +149,10 @@ class MainActivity : ComponentActivity() {
                             )
                             tab == 2 -> SettingsScreen(
                                 prefs = prefs,
-                                serverPollMode = serverPollMode,
+                                server = server,
+                                serverLoading = serverLoading,
+                                connStatus = connStatus,
+                                testing = testing,
                                 onPrefs = { np ->
                                     scope.launch {
                                         prefsRepo.update(np)
@@ -130,17 +161,41 @@ class MainActivity : ComponentActivity() {
                                         )
                                     }
                                 },
-                                onPushServerSettings = {
+                                onServer = { server = it },
+                                onSaveServer = {
+                                    val s = server ?: return@SettingsScreen
                                     scope.launch(Dispatchers.IO) {
-                                        runCatching {
-                                            val body = """{"poll_mode":"${prefs.pollMode}","poll_interval_minutes":${prefs.pollIntervalMin}}"""
-                                            okhttp3.OkHttpClient().newCall(
-                                                okhttp3.Request.Builder()
-                                                    .url("${prefs.serverUrl}/api/settings")
-                                                    .put(okhttp3.RequestBody.create(okhttp3.MediaType.parse("application/json"), body))
-                                                    .build()
-                                            ).execute().close()
+                                        val ok = runCatching {
+                                            // Keep phone + NAS polling in sync.
+                                            putServerSettings(
+                                                prefs.serverUrl,
+                                                s.copy(
+                                                    poll_mode = prefs.pollMode,
+                                                    poll_interval_minutes = prefs.pollIntervalMin,
+                                                ),
+                                            )
+                                        }.isSuccess
+                                        withContext(Dispatchers.Main) {
+                                            connStatus = if (ok) "NAS settings saved."
+                                            else "Save failed — check connection."
                                         }
+                                    }
+                                },
+                                onTestConnection = {
+                                    testing = true
+                                    scope.launch(Dispatchers.IO) {
+                                        val msg = try {
+                                            val h = checkHealth(prefs.serverUrl)
+                                            val n = runCatching { fetchFeed(prefs.serverUrl).size }.getOrDefault(-1)
+                                            "Connected. " + if (n >= 0) "$n videos indexed." else h.take(120)
+                                        } catch (e: Exception) {
+                                            "Failed: ${e.message}"
+                                        }
+                                        withContext(Dispatchers.Main) {
+                                            connStatus = msg
+                                            testing = false
+                                        }
+                                        loadServer()
                                     }
                                 },
                             )

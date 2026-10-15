@@ -23,6 +23,20 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            // Signed with the release keystore when env provides it
+            // (RUMINATE_KEYSTORE_PATH/PASSWORD/KEY_ALIAS/KEY_PASSWORD);
+            // otherwise plain `gradle assembleRelease` falls back to the
+            // debug key (fine for personal use, but keep one machine for
+            // Obtainium updates so the signature stays stable).
+            val ksPath = System.getenv("RUMINATE_KEYSTORE_PATH")
+            if (ksPath != null) {
+                signingConfig = signingConfigs.create("ruminateRelease") {
+                    storeFile = file(ksPath)
+                    storePassword = System.getenv("RUMINATE_KEYSTORE_PASSWORD")
+                    keyAlias = System.getenv("RUMINATE_KEY_ALIAS") ?: "ruminate"
+                    keyPassword = System.getenv("RUMINATE_KEY_PASSWORD")
+                }
+            }
         }
         debug {
             applicationIdSuffix = ".debug"

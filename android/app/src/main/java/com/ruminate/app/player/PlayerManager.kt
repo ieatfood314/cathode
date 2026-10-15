@@ -65,7 +65,7 @@ class RuminateDownloadService :
         DEFAULT_FOREGROUND_NOTIFICATION_UPDATE_INTERVAL,
         "ruminate_downloads",
         R.string.download_notification_channel,
-        0,
+        R.string.download_notification_channel_desc,
     ) {
     override fun getDownloadManager(): DownloadManager =
         PlayerHolder.getDownloadManager(this)
@@ -77,5 +77,7 @@ class RuminateDownloadService :
         downloads: MutableList<DownloadManager.DownloadUpdate>,
         notMetRequirements: Int,
     ) = DownloadNotificationHelper(this, "ruminate_downloads")
-        .buildProgressNotification(this, R.string.downloading, null, downloads, notMetRequirements)
+        .buildProgressNotification(
+            this, R.string.downloading, null, downloads, notMetRequirements
+        )
 }
