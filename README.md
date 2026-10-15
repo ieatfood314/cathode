@@ -19,7 +19,7 @@ YouTube ──poll──▶ server (yt-dlp + SponsorBlock) ──Wi-Fi only─�
 
 1. Server discovers uploads per channel (`yt-dlp --flat-playlist`, RSS-aware) on a schedule **or** when the app asks.
 2. Server downloads with resume-safe flags (`--continuedl`, fragment retries, backoff) + SponsorBlock (removes `sponsor,selfpromo,interaction`, marks the rest as chapters so archive jobs stay fast).
-3. App syncs **only on unmetered Wi-Fi** (WorkManager `UNMETERED` + runtime check + Media3 `REQUIREMENTS_UNMETERED`), streams/serves files with HTTP `Range`, so a dropped connection resumes where it stopped — never from zero.
+3. App syncs **only on unmetered Wi-Fi** (WorkManager `UNMETERED` + runtime check), streams files with HTTP `Range`, and keeps **offline copies as plain .mp4 files** — shared `Movies/Ruminate` by default, or any folder you pick (SD card, USB drive). A dropped connection resumes where it stopped — never from zero.
 
 ## Quick start (NAS)
 
