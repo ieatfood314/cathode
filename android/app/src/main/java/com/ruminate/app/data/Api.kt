@@ -89,6 +89,57 @@ fun putServerSettings(baseUrl: String, s: ServerSettings) {
     }
 }
 
+/** Channel sources the server tracks (export file entries + manual adds). */
+fun listSubscriptions(baseUrl: String): SubsResponse {
+    baseClient().newCall(Request.Builder().url("$baseUrl/api/subscriptions").build())
+        .execute().use { resp ->
+            if (!resp.isSuccessful) throw IllegalStateException("subscriptions HTTP ${resp.code}")
+            return json.decodeFromString(
+                SubsResponse.serializer(),
+                resp.body?.string().orEmpty().ifEmpty { """{"inputs":[]}""" },
+            )
+        }
+}
+
+/** Track one more channel (URL, @handle, or channel ID). */
+fun addChannel(baseUrl: String, url: String): String {
+    val body = "{\"url\":${json.encodeToString(url)}}"
+        .toRequestBody("application/json".toMediaType())
+    baseClient().newCall(
+        Request.Builder().url("$baseUrl/api/subscriptions").post(body).build()
+    ).execute().use { resp ->
+        val text = resp.body?.string().orEmpty()
+        if (!resp.isSuccessful) throw IllegalStateException(text.ifEmpty { "add HTTP ${resp.code}" })
+        return text
+    }
+}
+
+/** Stop tracking a manually-added channel. */
+fun removeChannel(baseUrl: String, url: String) {
+    val encoded = java.net.URLEncoder.encode(url, "UTF-8")
+    baseClient().newCall(
+        Request.Builder().url("$baseUrl/api/subscriptions?url=$encoded").delete().build()
+    ).execute().use { resp ->
+        if (!resp.isSuccessful) {
+            throw IllegalStateException(resp.body?.string().orEmpty().ifEmpty { "remove HTTP ${resp.code}" })
+        }
+    }
+}
+
+/** Upload a subscription export (.opml/.csv/.txt). Returns the server's message. */
+fun uploadSubscriptions(baseUrl: String, filename: String, bytes: ByteArray): String {
+    val part = okhttp3.MultipartBody.Builder().setType(okhttp3.MultipartBody.FORM)
+        .addFormDataPart("file", filename, bytes.toRequestBody("text/plain".toMediaType()))
+        .build()
+    baseClient().newCall(
+        Request.Builder().url("$baseUrl/api/subscriptions/upload").post(part).build()
+    ).execute().use { resp ->
+        val text = resp.body?.string().orEmpty()
+        if (!resp.isSuccessful) throw IllegalStateException(text.ifEmpty { "upload HTTP ${resp.code}" })
+        return text
+    }
+}
+
 /**
  * Resumable file download with HTTP Range. Progress survives app kills and
  * dropped connections: the .part file stays on disk and we resume with

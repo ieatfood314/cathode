@@ -35,6 +35,9 @@ class Settings(BaseSettings):
 
     # Retention: 0 = keep forever.
     keep_days: int = 0
+    # Delete the server file once you mark a video watched (phone copies are
+    # managed separately in the app). Off by default — destructive on a shared library.
+    delete_after_watched: bool = False
     max_videos_per_channel_scan: int = 10
 
     # HTTP server

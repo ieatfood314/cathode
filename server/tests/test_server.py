@@ -109,3 +109,75 @@ def test_refresh_returns_immediately():
     assert r.status_code == 200
     body = r.json()
     assert body["ok"] is True and "started" in body
+
+
+def test_add_remove_channel(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+    from app.config import settings
+    from app.main import app
+    monkeypatch.setattr(settings, "data_dir", str(tmp_path))
+    c = TestClient(app)
+    r = c.post("/api/subscriptions", json={"url": "https://www.youtube.com/@example"})
+    assert r.status_code == 200 and r.json()["added"] is True
+    r = c.post("/api/subscriptions", json={"url": "https://www.youtube.com/@example"})
+    assert r.json()["added"] is False
+    assert c.post("/api/subscriptions", json={"url": "not a url"}).status_code == 400
+    r = c.delete("/api/subscriptions", params={"url": "https://www.youtube.com/@example"})
+    assert r.json()["removed"] is True
+    assert c.delete("/api/subscriptions", params={"url": "https://www.youtube.com/@example"}).status_code == 404
+
+
+def test_upload_subscriptions(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+    from app.config import settings
+    from app.main import app
+    monkeypatch.setattr(settings, "data_dir", str(tmp_path))
+    c = TestClient(app)
+    opml = ('<opml><body><outline text="C" xmlUrl="https://www.youtube.com/feeds/videos.xml'
+            '?channel_id=UC1234567890123456789012"/></body></opml>')
+    r = c.post("/api/subscriptions/upload", files={"file": ("subs.opml", opml)})
+    assert r.status_code == 200 and r.json()["subscriptions"] == 1
+    r = c.post("/api/subscriptions/upload", files={"file": ("x.exe", "junk")})
+    assert r.status_code == 400
+    r = c.post("/api/subscriptions/upload",
+               files={"file": ("list.txt", "https://www.youtube.com/@a\nhttps://www.youtube.com/@a\n")})
+    assert r.json()["subscriptions"] == 1  # de-duplicated
+    subs = c.get("/api/subscriptions").json()["inputs"]
+    assert any(s["origin"] == "manual" for s in subs)
+
+
+def test_sponsorblock_sanitized(monkeypatch):
+    from fastapi.testclient import TestClient
+    from app.config import settings
+    from app.main import app
+    monkeypatch.setattr(settings, "sponsorblock_remove", "sponsor")
+    c = TestClient(app)
+    r = c.put("/api/settings", json={"sponsorblock_remove": "sponsor, nonsense, SELFpromo"})
+    assert r.json()["settings"]["sponsorblock_remove"] == "sponsor,selfpromo"
+
+
+def test_watched_deletes_server_file(monkeypatch):
+    from pathlib import Path as _P
+    from fastapi.testclient import TestClient
+    from app import db as dbmod
+    from app.config import settings
+    from app.main import app
+    media = _P(settings.media_dir)
+    media.mkdir(parents=True, exist_ok=True)
+    (media / "gone [abc123].mp4").write_bytes(b"data")
+    conn = dbmod.connect(settings.db_path)
+    conn.execute("INSERT OR REPLACE INTO videos(id,status,file_path,watched) "
+                 "VALUES('abc123','done','gone [abc123].mp4',0)")
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(settings, "delete_after_watched", True)
+    c = TestClient(app)
+    r = c.post("/api/videos/abc123/watched?watched=true")
+    assert r.json()["deleted_server_file"] is True
+    assert not (media / "gone [abc123].mp4").exists()
+    conn = dbmod.connect(settings.db_path)
+    row = conn.execute("SELECT status FROM videos WHERE id='abc123'").fetchone()
+    conn.close()
+    assert row["status"] == "deleted"
+    assert c.get("/api/feed").json()["videos"] == [] or all(
+        v["id"] != "abc123" for v in c.get("/api/feed").json()["videos"])

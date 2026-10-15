@@ -48,13 +48,19 @@ def format_selector(max_res: int) -> str:
 
 
 def build_download_cmd(video_url: str, out_tmpl: str, archive: Path) -> list[str]:
-    return [
+    cmd = [
         "yt-dlp",
         *BASE_FLAGS,
-        "--sponsorblock-mark", settings.sponsorblock_mark,
-        "--sponsorblock-remove", settings.sponsorblock_remove,
         "--sponsorblock-api", settings.sponsorblock_api,
-        "--sponsorblock-chapter-title", "[SponsorBlock]: %(category_names)l",
+    ]
+    # Empty mark/remove lists mean "do nothing" — omit the flags entirely
+    # (passing an empty string would fail the download).
+    if settings.sponsorblock_mark:
+        cmd += ["--sponsorblock-mark", settings.sponsorblock_mark,
+                "--sponsorblock-chapter-title", "[SponsorBlock]: %(category_names)l"]
+    if settings.sponsorblock_remove:
+        cmd += ["--sponsorblock-remove", settings.sponsorblock_remove]
+    return cmd + [
         "-f", format_selector(settings.max_resolution),
         "--download-archive", str(archive),
         "-o", out_tmpl,

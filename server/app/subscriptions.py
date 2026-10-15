@@ -28,6 +28,7 @@ class Subscription:
     source_url: str  # canonical channel or RSS url as given
     channel_id: str | None = None  # UC... when known (from RSS xmlUrl)
     title: str | None = None
+    origin: str = ""  # opml | takeout | manual (which input file it came from)
 
 
 RSS_RE = re.compile(r"channel_id=([A-Za-z0-9_-]{10,})")
@@ -113,13 +114,19 @@ def parse_channels_txt(path: Path) -> list[Subscription]:
 def load_subscriptions(data_dir: Path) -> list[Subscription]:
     """Merge all supported inputs, de-duplicated by (channel_id or source_url)."""
     seen: dict[str, Subscription] = {}
-    candidates: list[Subscription] = []
-    candidates += parse_opml(data_dir / "subscriptions.opml")
-    candidates += parse_opml(data_dir / "subscriptions.xml")
-    candidates += parse_takeout_csv(data_dir / "subscriptions.csv")
-    candidates += parse_channels_txt(data_dir / "channels.txt")
-    for s in candidates:
-        key = s.channel_id or s.source_url.strip().rstrip("/")
-        if key and key not in seen:
-            seen[key] = s
+    for path, origin in [(data_dir / "subscriptions.opml", "opml"),
+                         (data_dir / "subscriptions.xml", "opml"),
+                         (data_dir / "subscriptions.csv", "takeout"),
+                         (data_dir / "channels.txt", "manual")]:
+        if path.suffix == ".csv":
+            parsed = parse_takeout_csv(path)
+        elif path.name == "channels.txt":
+            parsed = parse_channels_txt(path)
+        else:
+            parsed = parse_opml(path)
+        for s in parsed:
+            s.origin = origin
+            key = s.channel_id or s.source_url.strip().rstrip("/")
+            if key and key not in seen:
+                seen[key] = s
     return list(seen.values())

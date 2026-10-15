@@ -11,10 +11,15 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.CircularProgressIndicator
@@ -22,15 +27,16 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import com.ruminate.app.data.SaveState
 import com.ruminate.app.data.Video
 
 @Composable
@@ -39,9 +45,14 @@ fun LibraryScreen(
     thumbUrl: (Video) -> String,
     loading: Boolean,
     wifiBlocked: Boolean,
+    saveStates: Map<String, SaveState>,
+    showSaveButtons: Boolean,
     onRefresh: () -> Unit,
     onOpen: (Video) -> Unit,
     onToggleWatched: (Video) -> Unit,
+    onSave: (Video) -> Unit,
+    onRemoveSaved: (Video) -> Unit,
+    onSaveAll: () -> Unit,
 ) {
     Column(
         Modifier
@@ -52,6 +63,9 @@ fun LibraryScreen(
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text("Library", style = MaterialTheme.typography.headlineMedium)
             Spacer(Modifier.weight(1f))
+            if (showSaveButtons && !wifiBlocked) {
+                TextButton(onClick = onSaveAll) { Text("Save all") }
+            }
             IconButton(onClick = onRefresh) {
                 Icon(Icons.Default.Refresh, contentDescription = "Sync now")
             }
@@ -74,6 +88,7 @@ fun LibraryScreen(
         }
         LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             items(videos, key = { it.id }) { v ->
+                val state = saveStates[v.id] ?: SaveState.NotSaved
                 GlassCard(
                     Modifier
                         .fillMaxWidth()
@@ -103,10 +118,32 @@ fun LibraryScreen(
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Icon(Icons.Default.PlayArrow, contentDescription = null, tint = AccentTeal)
                                 Text(
-                                    if (v.watched == 1) "Watched" else "Tap to watch offline",
+                                    when {
+                                        v.watched == 1 -> "Watched"
+                                        state is SaveState.Saved -> "Saved on phone — tap to watch"
+                                        state is SaveState.Saving -> "Saving ${"%.0f".format(state.fraction * 100)}%"
+                                        else -> "Tap to watch"
+                                    },
                                     style = MaterialTheme.typography.bodySmall,
                                 )
                             }
+                        }
+                        if (showSaveButtons && !wifiBlocked) {
+                            when (state) {
+                                is SaveState.Saved -> IconButton(onClick = { onRemoveSaved(v) }) {
+                                    Icon(Icons.Default.Delete, contentDescription = "Remove phone copy", tint = Color.Gray)
+                                }
+                                is SaveState.Saving -> CircularProgressIndicator(
+                                    modifier = Modifier.size(24.dp).padding(12.dp),
+                                    strokeWidth = 2.dp,
+                                )
+                                else -> IconButton(onClick = { onSave(v) }) {
+                                    Icon(Icons.Default.Download, contentDescription = "Save on phone", tint = AccentTeal)
+                                }
+                            }
+                        } else if (state is SaveState.Saved) {
+                            Icon(Icons.Default.Check, contentDescription = "Saved", tint = AccentTeal,
+                                modifier = Modifier.width(24.dp))
                         }
                     }
                 }
@@ -121,4 +158,13 @@ fun formatDuration(sec: Int): String {
     val s = sec % 60
     val h = m / 60
     return if (h > 0) "%d:%02d:%02d".format(h, m % 60, s) else "%d:%02d".format(m, s)
+}
+
+fun formatBytes(b: Long): String {
+    if (b <= 0) return "0 B"
+    val units = listOf("B", "KB", "MB", "GB")
+    var v = b.toDouble()
+    var u = 0
+    while (v >= 1024 && u < units.size - 1) { v /= 1024; u++ }
+    return "%.1f %s".format(v, units[u])
 }

@@ -7,14 +7,14 @@ import sqlite3
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 
 from . import db as dbmod
 from .config import settings
 from .poller import poller
-from .subscriptions import load_subscriptions
+from .subscriptions import Subscription, load_subscriptions, parse_opml, parse_takeout_csv
 from .web import PAGE as WEB_PAGE
 
 CHUNK = 1024 * 1024
@@ -82,6 +82,21 @@ class SettingsIn(BaseModel):
     sponsorblock_remove: str | None = None
     sponsorblock_mark: str | None = None
     keep_days: int | None = None
+    delete_after_watched: bool | None = None
+
+
+SB_KNOWN = {"all", "sponsor", "intro", "outro", "selfpromo", "preview",
+            "interaction", "filler", "music_offtopic", "poi_highlight"}
+
+
+def _clean_sb(value: str) -> str:
+    """Keep only real SponsorBlock categories (typos would fail downloads)."""
+    seen: list[str] = []
+    for tok in (value or "").split(","):
+        t = tok.strip().lower()
+        if t in SB_KNOWN and t not in seen:
+            seen.append(t)
+    return ",".join(seen)
 
 
 @app.get("/api/settings")
@@ -93,6 +108,7 @@ def get_settings():
         "sponsorblock_remove": settings.sponsorblock_remove,
         "sponsorblock_mark": settings.sponsorblock_mark,
         "keep_days": settings.keep_days,
+        "delete_after_watched": settings.delete_after_watched,
     }
 
 
@@ -105,11 +121,13 @@ def put_settings(body: SettingsIn):
     if body.max_resolution is not None:
         settings.max_resolution = max(360, min(2160, body.max_resolution))
     if body.sponsorblock_remove is not None:
-        settings.sponsorblock_remove = body.sponsorblock_remove
+        settings.sponsorblock_remove = _clean_sb(body.sponsorblock_remove)
     if body.sponsorblock_mark is not None:
-        settings.sponsorblock_mark = body.sponsorblock_mark
+        settings.sponsorblock_mark = _clean_sb(body.sponsorblock_mark)
     if body.keep_days is not None:
         settings.keep_days = max(0, body.keep_days)
+    if body.delete_after_watched is not None:
+        settings.delete_after_watched = bool(body.delete_after_watched)
     return {"ok": True, "settings": get_settings()}
 
 
@@ -121,10 +139,98 @@ def subscriptions():
         "SELECT id, url, title, last_checked FROM channels ORDER BY title").fetchall()]
     conn.close()
     return {
-        "inputs": [{"source_url": s.source_url, "channel_id": s.channel_id, "title": s.title}
+        "inputs": [{"source_url": s.source_url, "channel_id": s.channel_id,
+                    "title": s.title, "origin": s.origin}
                    for s in subs],
         "indexed": channels,
     }
+
+
+class ChannelIn(BaseModel):
+    url: str
+
+
+@app.post("/api/subscriptions")
+def add_subscription(body: ChannelIn):
+    """Track one more channel manually (channel URL, @handle, or UC id)."""
+    url = (body.url or "").strip()
+    ok = (url.startswith(("http://", "https://")) or url.startswith("@")
+          or re.match(r"^UC[A-Za-z0-9_-]{10,}$", url))
+    if not ok:
+        raise HTTPException(400, "give a channel URL, @handle, or channel ID")
+    data_dir = Path(settings.data_dir)
+    data_dir.mkdir(parents=True, exist_ok=True)
+    norm = url.rstrip("/")
+    for s in load_subscriptions(data_dir):
+        if (s.source_url or "").strip().rstrip("/") == norm or (s.channel_id and s.channel_id in url):
+            return {"ok": True, "added": False, "reason": "already tracked"}
+    with (data_dir / "channels.txt").open("a", encoding="utf-8") as f:
+        f.write(url + "\n")
+    return {"ok": True, "added": True}
+
+
+@app.delete("/api/subscriptions")
+def remove_subscription(url: str = Query(...)):
+    """Stop tracking a manually-added channel (channels.txt entries only)."""
+    data_dir = Path(settings.data_dir)
+    path = data_dir / "channels.txt"
+    if not path.exists():
+        raise HTTPException(404, "nothing to remove")
+    norm = (url or "").strip().rstrip("/")
+    lines = path.read_text(encoding="utf-8").splitlines()
+    kept = [ln for ln in lines if ln.strip().rstrip("/") != norm]
+    if len(kept) == len(lines):
+        raise HTTPException(
+            404, "not a manually-added channel — re-upload your export to change the rest")
+    path.write_text("\n".join(kept) + ("\n" if kept else ""), encoding="utf-8")
+    return {"ok": True, "removed": True}
+
+
+@app.post("/api/subscriptions/upload")
+async def upload_subscriptions(file: UploadFile = File(...)):
+    """Upload a subscription export (Takeout/OPML .opml/.xml/.csv, or .txt list)."""
+    name = (file.filename or "").lower()
+    raw = await file.read()
+    if len(raw) > 5_000_000:
+        raise HTTPException(400, "file too big (5 MB max)")
+    data_dir = Path(settings.data_dir)
+    data_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        text = raw.decode("utf-8-sig")
+    except Exception:
+        raise HTTPException(400, "file must be UTF-8 text")
+    if name.endswith((".opml", ".xml")):
+        dest = data_dir / "subscriptions.opml"
+        dest.write_text(text, encoding="utf-8")
+        try:
+            n = len(parse_opml(dest))
+        except Exception:
+            dest.unlink(missing_ok=True)
+            raise HTTPException(400, "not a valid OPML file")
+        return {"ok": True, "file": "subscriptions.opml", "subscriptions": n}
+    if name.endswith(".csv"):
+        dest = data_dir / "subscriptions.csv"
+        dest.write_text(text, encoding="utf-8")
+        n = len(parse_takeout_csv(dest))
+        if n == 0:
+            raise HTTPException(400, "no channels found — is this a Takeout subscriptions.csv?")
+        return {"ok": True, "file": "subscriptions.csv", "subscriptions": n}
+    if name.endswith(".txt"):
+        dest = data_dir / "channels.txt"
+        have = set()
+        if dest.exists():
+            have = {ln.strip() for ln in dest.read_text(encoding="utf-8").splitlines()
+                    if ln.strip() and not ln.strip().startswith("#")}
+        added = 0
+        with dest.open("a", encoding="utf-8") as f:
+            for ln in text.splitlines():
+                s = ln.strip()
+                if s and not s.startswith("#") and s not in have:
+                    f.write(s + "\n")
+                    have.add(s)
+                    added += 1
+        return {"ok": True, "file": "channels.txt", "subscriptions": added}
+    raise HTTPException(400, "send an .opml, .csv, or .txt file")
 
 
 @app.post("/api/subscriptions/refresh")
@@ -144,8 +250,24 @@ def mark_watched(video_id: str, watched: bool = True):
     conn = _conn()
     conn.execute("UPDATE videos SET watched=? WHERE id=?", (1 if watched else 0, video_id))
     conn.commit()
+    deleted_file = False
+    if watched and settings.delete_after_watched:
+        row = conn.execute("SELECT file_path FROM videos WHERE id=?", (video_id,)).fetchone()
+        if row and row["file_path"]:
+            media_dir = Path(settings.media_dir)
+            for p in media_dir.rglob(f"*{video_id}*"):
+                try:
+                    if p.is_file():
+                        p.unlink()
+                except OSError:
+                    pass
+            conn.execute(
+                "UPDATE videos SET status='deleted', file_path='', thumb_path='', "
+                "info_path='', filesize=0 WHERE id=?", (video_id,))
+            conn.commit()
+            deleted_file = True
     conn.close()
-    return {"ok": True}
+    return {"ok": True, "deleted_server_file": deleted_file}
 
 
 def _resolve_media(rel: str) -> Path:

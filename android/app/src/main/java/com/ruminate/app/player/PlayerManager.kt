@@ -4,7 +4,7 @@ import android.app.Notification
 import android.content.Context
 import androidx.annotation.StringRes
 import androidx.media3.datasource.DefaultHttpDataSource
-import androidx.media3.datasource.cache.NoOpCacheEvictor
+import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
 import androidx.media3.exoplayer.offline.DownloadManager
 import androidx.media3.exoplayer.offline.DownloadNotificationHelper
@@ -31,6 +31,17 @@ object PlayerHolder {
 
     fun requirements(): Requirements = Requirements(REQUIREMENTS_UNMETERED_FLAGS)
 
+    // Phone copies share one cache with playback and cap at 16 GB (oldest
+    // re-fetched on demand). Call only from the main thread.
+    const val MAX_CACHE_BYTES = 16L * 1024 * 1024 * 1024
+
+    fun cacheIfBuilt(): SimpleCache? = cache
+
+    fun getCache(context: Context): SimpleCache {
+        getDownloadManager(context)
+        return cache!!
+    }
+
     fun getDownloadManager(context: Context): DownloadManager {
         return downloadManager ?: synchronized(this) {
             downloadManager ?: build(context).also { downloadManager = it }
@@ -42,7 +53,7 @@ object PlayerHolder {
         dir.mkdirs()
         val dbProvider = androidx.media3.database.StandaloneDatabaseProvider(context)
         val index = androidx.media3.exoplayer.offline.DefaultDownloadIndex(dbProvider)
-        val c = SimpleCache(dir, NoOpCacheEvictor(), dbProvider)
+        val c = SimpleCache(dir, LeastRecentlyUsedCacheEvictor(MAX_CACHE_BYTES), dbProvider)
         cache = c
         val factory = androidx.media3.datasource.cache.CacheDataSource.Factory()
             .setCache(c)

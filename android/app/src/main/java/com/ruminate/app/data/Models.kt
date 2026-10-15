@@ -31,6 +31,21 @@ data class ServerSettings(
     @SerialName("sponsorblock_remove") val sponsorblockRemove: String = "sponsor,selfpromo,interaction",
     @SerialName("sponsorblock_mark") val sponsorblockMark: String = "all",
     @SerialName("keep_days") val keepDays: Int = 0,
+    @SerialName("delete_after_watched") val deleteAfterWatched: Boolean = false,
+)
+
+@Serializable
+data class SubInput(
+    @SerialName("source_url") val sourceUrl: String,
+    @SerialName("channel_id") val channelId: String? = null,
+    val title: String? = null,
+    val origin: String = "", // opml | takeout | manual
+)
+
+@Serializable
+data class SubsResponse(
+    val inputs: List<SubInput> = emptyList(),
+    val indexed: List<ChannelInfo> = emptyList(),
 )
 
 @Serializable
