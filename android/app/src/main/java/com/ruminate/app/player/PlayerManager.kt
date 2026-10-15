@@ -75,11 +75,10 @@ class RuminateDownloadService :
         androidx.media3.exoplayer.scheduler.PlatformScheduler(this, 1001)
 
     override fun getForegroundNotification(
-        downloads: List<androidx.media3.exoplayer.offline.Download>,
-        @StringRes notificationContentTitle: Int,
+        downloads: MutableList<androidx.media3.exoplayer.offline.Download>,
         notMetRequirements: Int,
     ): Notification = DownloadNotificationHelper(this, "ruminate_downloads")
         .buildProgressNotification(
-            this, notificationContentTitle, null, null, downloads, notMetRequirements
+            this, R.string.downloading, null, null, downloads, notMetRequirements
         )
 }
