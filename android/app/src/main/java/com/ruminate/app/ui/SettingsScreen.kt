@@ -155,15 +155,15 @@ fun SettingsScreen(
             GlassCard(Modifier.fillMaxWidth()) {
                 Text("SponsorBlock")
                 OutlinedTextField(
-                    value = server.sponsorblock_remove,
-                    onValueChange = { onServer(server.copy(sponsorblock_remove = it)) },
+                    value = server.sponsorblockRemove,
+                    onValueChange = { onServer(server.copy(sponsorblockRemove = it)) },
                     label = { Text("Remove (cut out)") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 OutlinedTextField(
-                    value = server.sponsorblock_mark,
-                    onValueChange = { onServer(server.copy(sponsorblock_mark = it)) },
+                    value = server.sponsorblockMark,
+                    onValueChange = { onServer(server.copy(sponsorblockMark = it)) },
                     label = { Text("Mark (as chapters)") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
@@ -176,10 +176,10 @@ fun SettingsScreen(
             Spacer(Modifier.height(12.dp))
             GlassCard(Modifier.fillMaxWidth()) {
                 Text("Retention")
-                Text(if (server.keep_days <= 0) "Keep forever" else "Keep ${server.keep_days} days")
+                Text(if (server.keepDays <= 0) "Keep forever" else "Keep ${server.keepDays} days")
                 Slider(
-                    value = server.keep_days.toFloat(),
-                    onValueChange = { onServer(server.copy(keep_days = it.toInt().coerceIn(0, 365))) },
+                    value = server.keepDays.toFloat(),
+                    onValueChange = { onServer(server.copy(keepDays = it.toInt().coerceIn(0, 365))) },
                     valueRange = 0f..365f,
                 )
             }

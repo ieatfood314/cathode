@@ -25,7 +25,7 @@ fun PlayerScreen(video: Video, streamUrl: String, onWatched: () -> Unit) {
     ) {
         Text(video.title.orEmpty(), style = MaterialTheme.typography.titleLarge)
         Text(
-            video.channel_title.orEmpty(),
+            video.channelTitle.orEmpty(),
             style = MaterialTheme.typography.bodyMedium, color = Color.Gray,
         )
         Spacer(Modifier.height(12.dp))

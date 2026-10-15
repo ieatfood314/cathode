@@ -37,6 +37,7 @@ import com.ruminate.app.worker.SyncWorker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import okhttp3.RequestBody.Companion.toRequestBody
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -127,7 +128,7 @@ class MainActivity : ComponentActivity() {
                                             okhttp3.OkHttpClient().newCall(
                                                 okhttp3.Request.Builder()
                                                     .url("${prefs.serverUrl}/api/videos/${open!!.id}/watched?watched=true")
-                                                    .post(okhttp3.RequestBody.create(null, ByteArray(0)))
+                                                    .post(ByteArray(0).toRequestBody(null))
                                                     .build()
                                             ).execute().close()
                                         }
@@ -170,8 +171,8 @@ class MainActivity : ComponentActivity() {
                                             putServerSettings(
                                                 prefs.serverUrl,
                                                 s.copy(
-                                                    poll_mode = prefs.pollMode,
-                                                    poll_interval_minutes = prefs.pollIntervalMin,
+                                                    pollMode = prefs.pollMode,
+                                                    pollIntervalMinutes = prefs.pollIntervalMin,
                                                 ),
                                             )
                                         }.isSuccess

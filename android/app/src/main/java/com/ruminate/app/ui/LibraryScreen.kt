@@ -96,7 +96,7 @@ fun LibraryScreen(
                                 style = MaterialTheme.typography.titleSmall,
                             )
                             Text(
-                                (v.channel_title ?: "") + "  •  " + formatDuration(v.duration),
+                                (v.channelTitle ?: "") + "  •  " + formatDuration(v.duration),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = Color.Gray,
                             )

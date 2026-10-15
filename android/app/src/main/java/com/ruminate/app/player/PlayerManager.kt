@@ -1,6 +1,8 @@
 package com.ruminate.app.player
 
+import android.app.Notification
 import android.content.Context
+import androidx.annotation.StringRes
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.cache.NoOpCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
@@ -37,10 +39,9 @@ object PlayerHolder {
     private fun build(context: Context): DownloadManager {
         val dir = File(context.filesDir, "ruminate_cache")
         dir.mkdirs()
-        val db = androidx.media3.exoplayer.offline.DefaultDownloadIndex(
-            androidx.media3.database.StandaloneDatabaseProvider(context)
-        )
-        val c = SimpleCache(dir, NoOpCacheEvictor(), db)
+        val dbProvider = androidx.media3.database.StandaloneDatabaseProvider(context)
+        val index = androidx.media3.exoplayer.offline.DefaultDownloadIndex(dbProvider)
+        val c = SimpleCache(dir, NoOpCacheEvictor(), dbProvider)
         cache = c
         val factory = androidx.media3.datasource.cache.CacheDataSource.Factory()
             .setCache(c)
@@ -52,7 +53,7 @@ object PlayerHolder {
             )
         val downloaderFactory = androidx.media3.exoplayer.offline.DefaultDownloaderFactory(factory,
             Executors.newFixedThreadPool(4))
-        return DownloadManager(context, db, downloaderFactory).apply {
+        return DownloadManager(context, index, downloaderFactory).apply {
             requirements = requirements()
             maxParallelDownloads = 3
         }
@@ -74,10 +75,11 @@ class RuminateDownloadService :
         androidx.media3.exoplayer.scheduler.PlatformScheduler(this, 1001)
 
     override fun getForegroundNotification(
-        downloads: MutableList<DownloadManager.DownloadUpdate>,
+        downloads: MutableList<androidx.media3.exoplayer.offline.Download>,
+        @StringRes notificationContentTitle: Int,
         notMetRequirements: Int,
-    ) = DownloadNotificationHelper(this, "ruminate_downloads")
+    ): Notification = DownloadNotificationHelper(this, "ruminate_downloads")
         .buildProgressNotification(
-            this, R.string.downloading, null, downloads, notMetRequirements
+            this, notificationContentTitle, null, downloads, notMetRequirements
         )
 }
