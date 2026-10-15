@@ -1,0 +1,22 @@
+services:
+  ruminate:
+    build: ./server
+    image: ruminate-server:latest
+    container_name: ruminate
+    restart: unless-stopped
+    ports:
+      - "${RUMINATE_PORT:-8000}:8000"
+    environment:
+      RUMINATE_DATA_DIR: /data
+      RUMINATE_MEDIA_DIR: /media
+      RUMINATE_DB_PATH: /data/ruminate.db
+      RUMINATE_ARCHIVE_PATH: /data/archive.txt
+      RUMINATE_POLL_MODE: ${RUMINATE_POLL_MODE:-periodic}
+      RUMINATE_POLL_INTERVAL_MINUTES: ${RUMINATE_POLL_INTERVAL_MINUTES:-30}
+      RUMINATE_MAX_RESOLUTION: ${RUMINATE_MAX_RESOLUTION:-1080}
+      RUMINATE_SPONSORBLOCK_REMOVE: ${RUMINATE_SPONSORBLOCK_REMOVE:-sponsor,selfpromo,interaction}
+      RUMINATE_SPONSORBLOCK_MARK: ${RUMINATE_SPONSORBLOCK_MARK:-all}
+      RUMINATE_KEEP_DAYS: ${RUMINATE_KEEP_DAYS:-0}
+    volumes:
+      - "${RUMINATE_DATA_DIR:-./data}:/data"
+      - "${RUMINATE_MEDIA_DIR:-./media}:/media"

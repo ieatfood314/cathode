@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<opml version="1.0">
+  <head><title>Ruminate example subscriptions (replace with your export)</title></head>
+  <body>
+    <!-- Replace this with your real YouTube Takeout / subscription-manager OPML.
+         Entry format: <outline text=".." title=".." type="rss"
+           xmlUrl="https://www.youtube.com/feeds/videos.xml?channel_id=UCxxxx"/> -->
+    <outline text="Example Channel" title="Example Channel" type="rss"
+      xmlUrl="https://www.youtube.com/feeds/videos.xml?channel_id=UCxxxxxxxxxxxxxxxxxxxxxx"/>
+  </body>
+</opml>

@@ -1,0 +1,13 @@
+# Example subscriptions — replace with your own. Free, no Premium needed.
+# One entry per line. Any of these forms:
+#   https://www.youtube.com/@SomeChannel
+#   https://www.youtube.com/channel/UCxxxxxxxxxxxxxxxxxxxxxx
+#   https://www.youtube.com/c/SomeChannel
+#   UCxxxxxxxxxxxxxxxxxxxxxx
+#   @SomeHandle
+# Lines starting with # are ignored.
+#
+# Better: drop your full export at data/subscriptions.opml (OPML) or
+# data/subscriptions.csv (Google Takeout). See README for the free export steps.
+
+https://www.youtube.com/@example-channel
