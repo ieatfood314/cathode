@@ -18,7 +18,9 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = true
+            // Minify off for v0.1.x: guarantees a working first APK without
+            // R8/serialization tuning. Can enable later with keep rules.
+            isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
