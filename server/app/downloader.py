@@ -127,3 +127,65 @@ def download_video(video_id: str, media_dir: Path, archive: Path,
         return False, "timeout after 1h"
     except Exception as e:  # yt-dlp missing etc.
         return False, str(e)
+
+
+def cutoff_ymd(days: int) -> str:
+    """YYYYMMDD string for N days ago (lexicographically comparable)."""
+    import datetime
+    return (datetime.date.today() - datetime.timedelta(days=max(0, days))).strftime("%Y%m%d")
+
+
+def fetch_rss_recent(channel_id: str) -> dict[str, str]:
+    """Fast free lookup: the channel RSS feed's newest videos as {id: YYYYMMDD}.
+
+    Flat playlist scans carry no dates, so this covers the common backfill case
+    without per-video extraction. Times out fast and fails soft ({}).
+    """
+    import urllib.request
+    import xml.etree.ElementTree as ET
+    url = f"https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "ruminate/0.1"})
+        with urllib.request.urlopen(req, timeout=20) as r:
+            root = ET.fromstring(r.read())
+    except Exception:
+        return {}
+    ns = "{http://www.w3.org/2005/Atom}"
+    yt = "{http://www.youtube.com/xml/schemas/2015}"
+    out: dict[str, str] = {}
+    try:
+        for entry in root.findall(f"{ns}entry"):
+            vid_el = entry.find(f"{yt}videoId")
+            pub_el = entry.find(f"{ns}published")
+            if vid_el is None or pub_el is None or not vid_el.text or not pub_el.text:
+                continue
+            ymd = pub_el.text[:10].replace("-", "")
+            if len(ymd) == 8 and ymd.isdigit():
+                out[vid_el.text.strip()] = ymd
+    except Exception:
+        return {}
+    return out
+
+
+def resolve_upload_dates(video_ids: list[str], limit: int = 150) -> dict[str, str]:
+    """Batch-resolve upload dates (one yt-dlp process for many videos).
+
+    Returns {id: YYYYMMDD}; ids that can't be dated are simply absent and the
+    caller decides (backfill keeps them — safer than skipping unseen videos).
+    """
+    ids = [i for i in video_ids if i][:max(1, limit)]
+    if not ids:
+        return {}
+    cmd = ["yt-dlp", "--no-warnings", "--skip-download",
+           "--print", "%(id)s %(upload_date)s",
+           *[f"https://www.youtube.com/watch?v={i}" for i in ids]]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    except Exception:
+        return {}
+    out: dict[str, str] = {}
+    for line in (proc.stdout or "").splitlines():
+        parts = line.strip().split()
+        if len(parts) == 2 and len(parts[1]) == 8 and parts[1].isdigit():
+            out[parts[0]] = parts[1]
+    return out

@@ -124,6 +124,18 @@ fun SubscriptionsScreen(serverUrl: String) {
         Text("Channels", style = MaterialTheme.typography.headlineMedium)
         Spacer(Modifier.height(12.dp))
 
+        if (serverUrl.isBlank()) {
+            GlassCard(Modifier.fillMaxWidth()) {
+                Text("Set your server URL first", color = AccentTeal)
+                Text(
+                    "The buttons below wake up once the app knows where your server is — " +
+                        "enter it in Settings, then come back here.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            Spacer(Modifier.height(12.dp))
+        }
+
         GlassCard(Modifier.fillMaxWidth()) {
             Text("How to add everything at once")
             Text(
@@ -144,7 +156,7 @@ fun SubscriptionsScreen(serverUrl: String) {
             OutlinedTextField(
                 value = newUrl,
                 onValueChange = { newUrl = it },
-                label = { Text("Channel link, @handle, or ID") },
+                label = { Text("Any link, @handle, or ID") },
                 placeholder = { Text("https://www.youtube.com/@example") },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),

@@ -14,7 +14,7 @@ from pydantic import BaseModel
 from . import db as dbmod
 from .config import settings
 from .poller import poller
-from .subscriptions import Subscription, load_subscriptions, parse_opml, parse_takeout_csv
+from .subscriptions import Subscription, load_subscriptions, normalize_channel_input, parse_opml, parse_takeout_csv
 from .web import PAGE as WEB_PAGE
 
 CHUNK = 1024 * 1024
@@ -82,6 +82,7 @@ class SettingsIn(BaseModel):
     sponsorblock_remove: str | None = None
     sponsorblock_mark: str | None = None
     keep_days: int | None = None
+    backfill_days: int | None = None
     delete_after_watched: bool | None = None
 
 
@@ -108,6 +109,7 @@ def get_settings():
         "sponsorblock_remove": settings.sponsorblock_remove,
         "sponsorblock_mark": settings.sponsorblock_mark,
         "keep_days": settings.keep_days,
+        "backfill_days": settings.backfill_days,
         "delete_after_watched": settings.delete_after_watched,
     }
 
@@ -126,6 +128,8 @@ def put_settings(body: SettingsIn):
         settings.sponsorblock_mark = _clean_sb(body.sponsorblock_mark)
     if body.keep_days is not None:
         settings.keep_days = max(0, body.keep_days)
+    if body.backfill_days is not None:
+        settings.backfill_days = max(0, min(3650, body.backfill_days))
     if body.delete_after_watched is not None:
         settings.delete_after_watched = bool(body.delete_after_watched)
     return {"ok": True, "settings": get_settings()}
@@ -152,21 +156,23 @@ class ChannelIn(BaseModel):
 
 @app.post("/api/subscriptions")
 def add_subscription(body: ChannelIn):
-    """Track one more channel manually (channel URL, @handle, or UC id)."""
-    url = (body.url or "").strip()
-    ok = (url.startswith(("http://", "https://")) or url.startswith("@")
-          or re.match(r"^UC[A-Za-z0-9_-]{10,}$", url))
-    if not ok:
-        raise HTTPException(400, "give a channel URL, @handle, or channel ID")
+    """Track one more channel manually — any URL/handle/ID form works."""
+    try:
+        url = normalize_channel_input(body.url)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
     data_dir = Path(settings.data_dir)
     data_dir.mkdir(parents=True, exist_ok=True)
-    norm = url.rstrip("/")
     for s in load_subscriptions(data_dir):
-        if (s.source_url or "").strip().rstrip("/") == norm or (s.channel_id and s.channel_id in url):
-            return {"ok": True, "added": False, "reason": "already tracked"}
+        try:
+            existing = normalize_channel_input(s.source_url)
+        except ValueError:
+            existing = (s.source_url or "").strip().rstrip("/")
+        if existing == url or (s.channel_id and s.channel_id in url):
+            return {"ok": True, "added": False, "reason": "already tracked", "url": url}
     with (data_dir / "channels.txt").open("a", encoding="utf-8") as f:
         f.write(url + "\n")
-    return {"ok": True, "added": True}
+    return {"ok": True, "added": True, "url": url}
 
 
 @app.delete("/api/subscriptions")
@@ -176,9 +182,19 @@ def remove_subscription(url: str = Query(...)):
     path = data_dir / "channels.txt"
     if not path.exists():
         raise HTTPException(404, "nothing to remove")
-    norm = (url or "").strip().rstrip("/")
+    try:
+        norm = normalize_channel_input(url)
+    except ValueError:
+        norm = (url or "").strip().rstrip("/")
     lines = path.read_text(encoding="utf-8").splitlines()
-    kept = [ln for ln in lines if ln.strip().rstrip("/") != norm]
+
+    def canon(ln: str) -> str:
+        try:
+            return normalize_channel_input(ln)
+        except ValueError:
+            return ln.strip().rstrip("/")
+
+    kept = [ln for ln in lines if canon(ln) != norm]
     if len(kept) == len(lines):
         raise HTTPException(
             404, "not a manually-added channel — re-upload your export to change the rest")

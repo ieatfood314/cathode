@@ -143,10 +143,16 @@ class Poller:
         if src and "feeds/videos.xml" not in src and src not in candidates:
             candidates.append(f"{src}/videos" if not src.endswith("/videos") else src)
         vids: list[dict] = []
+        limit = settings.max_videos_per_channel_scan
+        backfill = max(0, settings.backfill_days or 0)
+        if backfill > 0:
+            limit = max(limit, 200)  # reach further back; dates filter below
         for url in candidates:
-            vids = discover_channel_videos(url, settings.max_videos_per_channel_scan)
+            vids = discover_channel_videos(url, limit)
             if vids:
                 break
+        if backfill > 0 and vids:
+            vids = self._apply_backfill(channel_id, vids, backfill)
         disc = down = fail = 0
         for v in vids:
             vid = v.get("id")
@@ -189,6 +195,29 @@ class Poller:
         conn.execute("UPDATE channels SET last_checked=? WHERE id=?", (int(time.time()), channel_id))
         conn.commit()
         return (disc, down, fail)
+
+    def _apply_backfill(self, channel_id: str | None, vids: list[dict], days: int) -> list[dict]:
+        """Keep only videos from the last N days (plus undatable ones).
+
+        Flat scans carry no dates, so dates come from the free RSS feed first
+        and a single batched yt-dlp call second. Anything still undatable is
+        kept — safer than silently dropping videos you haven't seen.
+        """
+        from .downloader import cutoff_ymd, fetch_rss_recent, resolve_upload_dates
+        cutoff = cutoff_ymd(days)
+        dated: dict[str, str] = fetch_rss_recent(channel_id) if channel_id else {}
+        flat_ids = [v.get("id") for v in vids
+                    if v.get("id") and not str(v.get("id")).startswith("UC")]
+        dated.update(resolve_upload_dates([i for i in flat_ids if i not in dated]))
+        kept = []
+        for v in vids:
+            vid = v.get("id")
+            if not vid or str(vid).startswith("UC"):
+                continue
+            d = dated.get(vid)
+            if d is None or d >= cutoff:
+                kept.append(v)
+        return kept
 
     def _enrich_from_info(self, conn: sqlite3.Connection, vid: str, info: Path | None):
         """Backfill accurate metadata from yt-dlp's .info.json.

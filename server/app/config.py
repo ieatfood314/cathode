@@ -35,6 +35,9 @@ class Settings(BaseSettings):
 
     # Retention: 0 = keep forever.
     keep_days: int = 0
+    # Backfill: 0 = off (latest-N videos only).
+    # N > 0 also grabs everything uploaded in the last N days per channel.
+    backfill_days: int = 0
     # Delete the server file once you mark a video watched (phone copies are
     # managed separately in the app). Off by default — destructive on a shared library.
     delete_after_watched: bool = False

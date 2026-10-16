@@ -46,6 +46,7 @@ import com.ruminate.app.ui.SubscriptionsScreen
 import com.ruminate.app.ui.formatBytes
 import com.ruminate.app.worker.SyncWorker
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -153,15 +154,18 @@ class MainActivity : ComponentActivity() {
                 }
 
                 LaunchedEffect(Unit) {
-                    // One-time: drop the pre-0.1.3 opaque download cache. Saved
-                    // videos are plain files now; nothing of value was in there
-                    // that the server can't re-serve.
-                    if (!prefs.legacyCacheWiped) {
+                    // NOTE: prefs here must come from the stored flow, NOT the
+                    // composable's value: on a cold start the first composition
+                    // still holds blank defaults, and writing those back would
+                    // wipe the saved server URL (the 0.1.3 restart bug).
+                    val current = prefsRepo.flow.first()
+                    if (!current.legacyCacheWiped) {
                         File(filesDir, "ruminate_cache").deleteRecursively()
-                        prefsRepo.update(prefs.copy(legacyCacheWiped = true))
+                        prefsRepo.update(current.copy(legacyCacheWiped = true))
                     }
                     SyncWorker.runOnOpen(this@MainActivity)
-                    SyncWorker.schedulePeriodic(this@MainActivity, prefs.pollIntervalMin, prefs.pollMode)
+                    SyncWorker.schedulePeriodic(
+                        this@MainActivity, current.pollIntervalMin, current.pollMode)
                 }
                 // (Re)load the library once the server URL is known. Without
                 // this the first launch shows an empty library: prefs load

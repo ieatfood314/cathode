@@ -241,6 +241,10 @@ fun SettingsScreen(
                     onValueChange = { onServer(server.copy(keepDays = it.toInt().coerceIn(0, 365))) },
                     valueRange = 0f..365f,
                 )
+                Text("Backfill recent videos")
+                Text("Also grab the backlog from the last N days per channel — not just the newest uploads.",
+                    style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                BackfillRow(server.backfillDays) { onServer(server.copy(backfillDays = it)) }
                 SwitchRow("Delete server file after watching",
                     "Frees server space once you mark a video watched. Off by default.",
                     server.deleteAfterWatched) { onServer(server.copy(deleteAfterWatched = it)) }
@@ -290,6 +294,29 @@ private fun StorageFolderRow(
             "Pick internal storage, an SD card, or a USB drive.",
             style = MaterialTheme.typography.bodySmall, color = Color.Gray,
         )
+    }
+}
+
+@Composable
+private fun BackfillRow(selected: Int, onPick: (Int) -> Unit) {
+    val options = listOf(0 to "Off", 5 to "5 days", 7 to "7 days", 30 to "30 days", 90 to "90 days")
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        for (row in options.chunked(3)) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                for ((days, label) in row) {
+                    FilterChip(
+                        selected = selected == days,
+                        onClick = { onPick(days) },
+                        label = { Text(label, maxLines = 1) },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
+            }
+        }
     }
 }
 

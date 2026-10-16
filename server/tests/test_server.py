@@ -181,3 +181,64 @@ def test_watched_deletes_server_file(monkeypatch):
     assert row["status"] == "deleted"
     assert c.get("/api/feed").json()["videos"] == [] or all(
         v["id"] != "abc123" for v in c.get("/api/feed").json()["videos"])
+
+
+def test_normalize_channel_input():
+    from app.subscriptions import normalize_channel_input as n
+    fake = lambda vid: "https://www.youtube.com/channel/UCresolved"
+    assert n("UC1234567890123456789012") == "https://www.youtube.com/channel/UC1234567890123456789012"
+    assert n("@t3dotgg") == "https://www.youtube.com/@t3dotgg"
+    assert n("t3dotgg") == "https://www.youtube.com/@t3dotgg"
+    assert n("https://www.youtube.com/@t3dotgg/videos") == "https://www.youtube.com/@t3dotgg"
+    assert n("https://m.youtube.com/@t3dotgg") == "https://www.youtube.com/@t3dotgg"
+    assert n("m.youtube.com/@t3dotgg") == "https://www.youtube.com/@t3dotgg"
+    assert n("youtube.com/c/SomeName?si=abc") == "https://www.youtube.com/c/SomeName"
+    assert n("https://www.youtube.com/user/OldUser/about") == "https://www.youtube.com/user/OldUser"
+    assert n("https://www.youtube.com/channel/UCabc/videos") == "https://www.youtube.com/channel/UCabc"
+    assert n("https://youtu.be/dQw4w9WgXcQ", resolve_video=fake) == "https://www.youtube.com/channel/UCresolved"
+    assert n("https://www.youtube.com/watch?v=dQw4w9WgXcQ", resolve_video=fake) == \
+        "https://www.youtube.com/channel/UCresolved"
+    assert n("https://www.youtube.com/shorts/dQw4w9WgXcQ", resolve_video=fake) == \
+        "https://www.youtube.com/channel/UCresolved"
+    for bad in ["", "not a url", "https://example.com/@x", "https://www.youtube.com/playlist?list=PL1",
+                "https://www.youtube.com/results?search_query=x"]:
+        try:
+            n(bad, resolve_video=fake)
+        except ValueError:
+            continue
+        raise AssertionError(f"should have rejected: {bad}")
+
+
+def test_add_normalizes_and_rejects(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+    from app.config import settings
+    from app.main import app
+    monkeypatch.setattr(settings, "data_dir", str(tmp_path))
+    c = TestClient(app)
+    r = c.post("/api/subscriptions", json={"url": "https://m.youtube.com/@example/videos"})
+    assert r.status_code == 200 and r.json()["url"] == "https://www.youtube.com/@example"
+    r = c.post("/api/subscriptions", json={"url": "@example"})
+    assert r.json()["added"] is False  # same channel, different form
+    r = c.post("/api/subscriptions", json={"url": "https://vimeo.com/123"})
+    assert r.status_code == 400
+
+
+def test_backfill_filter(monkeypatch):
+    import app.downloader as dl
+    from app.poller import Poller
+    monkeypatch.setattr(dl, "fetch_rss_recent", lambda cid: {"new1": "20990101"})
+    monkeypatch.setattr(dl, "resolve_upload_dates",
+                        lambda ids: {"old1": "20000101"} if ids else {})
+    p = Poller()
+    vids = [{"id": "new1"}, {"id": "old1"}, {"id": "mystery1"}, {"id": "UCnotaVideo"}]
+    kept = p._apply_backfill("UCchan", vids, 30)
+    ids = [v["id"] for v in kept]
+    assert "new1" in ids and "mystery1" in ids  # in-window + undatable kept
+    assert "old1" not in ids and "UCnotaVideo" not in ids
+
+
+def test_cutoff_ymd_format():
+    from app.downloader import cutoff_ymd
+    import re
+    assert re.fullmatch(r"\d{8}", cutoff_ymd(30))
+    assert cutoff_ymd(30) < cutoff_ymd(5) <= cutoff_ymd(0)

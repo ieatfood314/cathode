@@ -62,6 +62,7 @@ button:hover { border-color: #8b7cff; }
   <label>SponsorBlock: cut out <input id="s_sponsorblock_remove"></label>
   <label>SponsorBlock: chapter-mark <input id="s_sponsorblock_mark"></label>
   <label>Keep days (0 = forever) <input id="s_keep_days" type="number" min="0" max="3650"></label>
+  <label>Backfill days (0 = off) <input id="s_backfill_days" type="number" min="0" max="3650"></label>
   <button onclick="saveSettings()">Save settings</button>
 </div>
 <script>
@@ -124,7 +125,7 @@ async function loadSettings() {
   try {
     const s = await api('/api/settings');
     for (const k of ['poll_mode', 'poll_interval_minutes', 'max_resolution',
-                     'sponsorblock_remove', 'sponsorblock_mark', 'keep_days'])
+                     'sponsorblock_remove', 'sponsorblock_mark', 'keep_days', 'backfill_days'])
       $('s_' + k).value = s[k];
   } catch (e) {}
 }
@@ -136,6 +137,7 @@ async function saveSettings() {
     sponsorblock_remove: $('s_sponsorblock_remove').value,
     sponsorblock_mark: $('s_sponsorblock_mark').value,
     keep_days: +$('s_keep_days').value,
+    backfill_days: +$('s_backfill_days').value,
   };
   try {
     await api('/api/settings', {method: 'PUT',

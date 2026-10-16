@@ -1,8 +1,8 @@
 # Example subscriptions — replace with your own. Free, no Premium needed.
-# One entry per line. Any of these forms:
+# One entry per line. Almost any form works (m.youtube.com, scheme-less,
+# /c/, /user/, trailing tabs like /videos, video & shorts links, bare handles):
 #   https://www.youtube.com/@SomeChannel
 #   https://www.youtube.com/channel/UCxxxxxxxxxxxxxxxxxxxxxx
-#   https://www.youtube.com/c/SomeChannel
 #   UCxxxxxxxxxxxxxxxxxxxxxx
 #   @SomeHandle
 # Lines starting with # are ignored.

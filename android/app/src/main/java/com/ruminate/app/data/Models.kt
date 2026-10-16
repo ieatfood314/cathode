@@ -31,6 +31,7 @@ data class ServerSettings(
     @SerialName("sponsorblock_remove") val sponsorblockRemove: String = "sponsor,selfpromo,interaction",
     @SerialName("sponsorblock_mark") val sponsorblockMark: String = "all",
     @SerialName("keep_days") val keepDays: Int = 0,
+    @SerialName("backfill_days") val backfillDays: Int = 0,
     @SerialName("delete_after_watched") val deleteAfterWatched: Boolean = false,
 )
 
