@@ -1,5 +1,6 @@
 """Smoke tests for subscription parsing + API (no network, no personal data)."""
 
+import re
 from pathlib import Path
 
 from app.subscriptions import (
@@ -242,3 +243,29 @@ def test_cutoff_ymd_format():
     import re
     assert re.fullmatch(r"\d{8}", cutoff_ymd(30))
     assert cutoff_ymd(30) < cutoff_ymd(5) <= cutoff_ymd(0)
+
+
+def test_download_flags_exist_in_ytdlp():
+    """Every --flag we pass must exist in the installed yt-dlp.
+
+    A renamed/removed flag fails EVERY download (see: --continuedl), so this
+    guards the exact binary the container ships.
+    """
+    import shutil
+    import subprocess
+    from app.downloader import BASE_FLAGS, build_download_cmd
+    from pathlib import Path
+    exe = shutil.which("yt-dlp")
+    if exe is None:
+        return  # dev machine without yt-dlp: CI image always has it
+    help_text = subprocess.run([exe, "--help"], capture_output=True, text=True,
+                               timeout=60).stdout
+    assert "--continue" in help_text
+    cmd = " ".join(build_download_cmd("https://www.youtube.com/watch?v=x", "/tmp/o", Path("/tmp/a")))
+    for flag in ["--continue", "--retries", "--fragment-retries", "--retry-sleep",
+                 "--socket-timeout", "--embed-metadata", "--embed-chapters",
+                 "--embed-thumbnail", "--write-info-json", "--write-thumbnail",
+                 "--merge-output-format", "--download-archive", "--sponsorblock-mark",
+                 "--sponsorblock-remove", "--sponsorblock-api"]:
+        assert flag in cmd, flag
+        assert re.search(rf"(^|\s){re.escape(flag)}(\s|,)", help_text), flag

@@ -32,6 +32,20 @@ import com.ruminate.app.data.AppPrefs
 import com.ruminate.app.data.ServerSettings
 import com.ruminate.app.data.VideoStore
 
+/** Retention steps: every day up to a month, then 60 / 90 / 180 / 360. */
+val RETENTION_OPTIONS: List<Int> = listOf(0) + (1..30).toList() + listOf(60, 90, 180, 360)
+
+fun retentionLabel(days: Int): String = when {
+    days <= 0 -> "Keep forever"
+    days == 1 -> "Keep 1 day"
+    days < 30 -> "Keep $days days"
+    days < 60 -> "Keep about a month"
+    days < 90 -> "Keep about 2 months"
+    days < 180 -> "Keep about 3 months"
+    days < 360 -> "Keep about 6 months"
+    else -> "Keep about a year"
+}
+
 /** SponsorBlock categories: id + short button label. */
 val SB_CATS = listOf(
     "sponsor" to "Sponsors",
@@ -87,7 +101,6 @@ fun SettingsScreen(
     storageLabel: String,
     onPrefs: (AppPrefs) -> Unit,
     onServer: (ServerSettings) -> Unit,
-    onSaveServer: () -> Unit,
     onTestConnection: () -> Unit,
     onClearSaved: () -> Unit,
 ) {
@@ -235,12 +248,8 @@ fun SettingsScreen(
             Spacer(Modifier.height(12.dp))
             GlassCard(Modifier.fillMaxWidth()) {
                 Text("Retention")
-                Text(if (server.keepDays <= 0) "Keep forever" else "Keep ${server.keepDays} days")
-                Slider(
-                    value = server.keepDays.toFloat(),
-                    onValueChange = { onServer(server.copy(keepDays = it.toInt().coerceIn(0, 365))) },
-                    valueRange = 0f..365f,
-                )
+                Text(retentionLabel(server.keepDays))
+                RetentionSlider(server.keepDays) { onServer(server.copy(keepDays = it)) }
                 Text("Backfill recent videos")
                 Text("Also grab the backlog from the last N days per channel — not just the newest uploads.",
                     style = MaterialTheme.typography.bodySmall, color = Color.Gray)
@@ -248,10 +257,6 @@ fun SettingsScreen(
                 SwitchRow("Delete server file after watching",
                     "Frees server space once you mark a video watched. Off by default.",
                     server.deleteAfterWatched) { onServer(server.copy(deleteAfterWatched = it)) }
-            }
-            Spacer(Modifier.height(12.dp))
-            Button(onClick = onSaveServer, modifier = Modifier.fillMaxWidth()) {
-                Text("Save server settings")
             }
         } else {
             GlassCard(Modifier.fillMaxWidth()) {
@@ -295,6 +300,30 @@ private fun StorageFolderRow(
             style = MaterialTheme.typography.bodySmall, color = Color.Gray,
         )
     }
+}
+
+@Composable
+private fun RetentionSlider(days: Int, onPick: (Int) -> Unit) {
+    // Snap any legacy value (e.g. from the old linear slider) to the nearest step.
+    val idx = RETENTION_OPTIONS.indices.minByOrNull { kotlin.math.abs(RETENTION_OPTIONS[it] - days) } ?: 0
+    Slider(
+        value = idx.toFloat(),
+        onValueChange = { onPick(RETENTION_OPTIONS[it.toInt().coerceIn(RETENTION_OPTIONS.indices)]) },
+        valueRange = 0f..(RETENTION_OPTIONS.size - 1).toFloat(),
+        steps = RETENTION_OPTIONS.size - 2,
+    )
+}
+
+@Composable
+private fun RetentionSlider(days: Int, onPick: (Int) -> Unit) {
+    // Snap any legacy value (e.g. from the old linear slider) to the nearest step.
+    val idx = RETENTION_OPTIONS.indices.minByOrNull { kotlin.math.abs(RETENTION_OPTIONS[it] - days) } ?: 0
+    Slider(
+        value = idx.toFloat(),
+        onValueChange = { onPick(RETENTION_OPTIONS[it.toInt().coerceIn(RETENTION_OPTIONS.indices)]) },
+        valueRange = 0f..(RETENTION_OPTIONS.size - 1).toFloat(),
+        steps = RETENTION_OPTIONS.size - 2,
+    )
 }
 
 @Composable

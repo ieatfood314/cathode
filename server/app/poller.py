@@ -177,7 +177,7 @@ class Poller:
                 files = sorted(media_dir.rglob(f"*{vid}.*"))
                 main = next((p for p in files if p.suffix.lower() in (".mp4", ".mkv", ".webm")), None)
                 thumb = next((p for p in files if p.suffix.lower() in (".jpg", ".webp", ".png")), None)
-                info = next((p for p in files if p.suffix == ".info.json"), None)
+                info = next((p for p in files if p.name.endswith(".info.json")), None)
                 size = main.stat().st_size if main and main.exists() else 0
                 dbmod.mark_downloaded(
                     conn, vid,

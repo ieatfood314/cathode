@@ -20,7 +20,7 @@ from .config import settings
 
 BASE_FLAGS = [
     "--no-progress",
-    "--continuedl",
+    "--continue",  # NOT --continuedl: removed from yt-dlp (broke every download in 0.1.4)
     "--retries", "10",
     "--fragment-retries", "10",
     "--file-access-retries", "10",
@@ -32,8 +32,8 @@ BASE_FLAGS = [
     "--embed-chapters",
     "--embed-thumbnail",
     "--convert-thumbnails", "jpg",
-    "--writeinfojson",
-    "--writethumbnail",
+    "--write-info-json",
+    "--write-thumbnail",
     "--merge-output-format", "mp4",
 ]
 

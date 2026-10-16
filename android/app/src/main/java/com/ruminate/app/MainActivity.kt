@@ -69,6 +69,8 @@ class MainActivity : ComponentActivity() {
                 var open: Video? by remember { mutableStateOf(null) }
                 var openUri by remember { mutableStateOf<Uri?>(null) }
                 var server by remember { mutableStateOf<ServerSettings?>(null) }
+                var serverDirty by remember { mutableStateOf(false) }
+                var serverDirty by remember { mutableStateOf(false) }
                 var serverLoading by remember { mutableStateOf(false) }
                 var connStatus by remember { mutableStateOf<String?>(null) }
                 var testing by remember { mutableStateOf(false) }
@@ -146,9 +148,29 @@ class MainActivity : ComponentActivity() {
                     scope.launch(Dispatchers.IO) {
                         val s = runCatching { getServerSettings(prefs.serverUrl) }.getOrNull()
                         withContext(Dispatchers.Main) {
+                            serverDirty = false
                             server = s
                             serverLoading = false
                             if (s == null) connStatus = "Could not reach the server."
+                        }
+                    }
+                }
+
+                fun saveServerNow(s: ServerSettings) {
+                    scope.launch(Dispatchers.IO) {
+                        val ok = runCatching {
+                            // Keep phone + server polling in sync.
+                            putServerSettings(
+                                prefs.serverUrl,
+                                s.copy(
+                                    pollMode = prefs.pollMode,
+                                    pollIntervalMinutes = prefs.pollIntervalMin,
+                                ),
+                            )
+                        }.isSuccess
+                        withContext(Dispatchers.Main) {
+                            connStatus = if (ok) "Server settings saved."
+                            else "Couldn't save — will retry on your next change."
                         }
                     }
                 }
@@ -177,6 +199,16 @@ class MainActivity : ComponentActivity() {
                 // Load full server config whenever the Settings tab opens.
                 LaunchedEffect(tab) {
                     if (tab == 3) loadServer()
+                }
+                // Auto-save server settings (debounced): every change restarts
+                // the wait, so dragging a slider sends one PUT at the end.
+                // Loads don't mark dirty, so opening Settings never saves.
+                LaunchedEffect(server) {
+                    val s = server
+                    if (!serverDirty || s == null) return@LaunchedEffect
+                    kotlinx.coroutines.delay(900)
+                    serverDirty = false
+                    saveServerNow(s)
                 }
                 // Resolve the open video's local file (plain-file scan is IO).
                 LaunchedEffect(open?.id, saveStates[open?.id]) {
@@ -286,26 +318,7 @@ class MainActivity : ComponentActivity() {
                                         )
                                     }
                                 },
-                                onServer = { server = it },
-                                onSaveServer = {
-                                    val s = server ?: return@SettingsScreen
-                                    scope.launch(Dispatchers.IO) {
-                                        val ok = runCatching {
-                                            // Keep phone + server polling in sync.
-                                            putServerSettings(
-                                                prefs.serverUrl,
-                                                s.copy(
-                                                    pollMode = prefs.pollMode,
-                                                    pollIntervalMinutes = prefs.pollIntervalMin,
-                                                ),
-                                            )
-                                        }.isSuccess
-                                        withContext(Dispatchers.Main) {
-                                            connStatus = if (ok) "Server settings saved."
-                                            else "Save failed — check connection."
-                                        }
-                                    }
-                                },
+                                onServer = { server = it; serverDirty = true },
                                 onTestConnection = {
                                     testing = true
                                     scope.launch(Dispatchers.IO) {
