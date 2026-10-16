@@ -269,3 +269,33 @@ def test_download_flags_exist_in_ytdlp():
                  "--sponsorblock-remove", "--sponsorblock-api"]:
         assert flag in cmd, flag
         assert re.search(rf"(^|\s){re.escape(flag)}(\s|,)", help_text), flag
+
+
+def test_repair_missing_paths(tmp_path, monkeypatch):
+    """Regression: yt-dlp names files '[id].ext' — the matcher must find them.
+
+    (The old *id.* glob never matched, so downloads were marked done with
+    empty paths and skipped forever.)
+    """
+    from app import db as dbmod
+    from app.poller import Poller
+    media = tmp_path / "media"
+    chan = media / "SomeChannel"
+    chan.mkdir(parents=True)
+    (chan / "20240101 - Title One [abc123XYZ_-].mp4").write_bytes(b"v" * 100)
+    (chan / "20240101 - Title One [abc123XYZ_-].jpg").write_bytes(b"t" * 10)
+    (chan / "20240101 - Title One [abc123XYZ_-].info.json").write_text(
+        '{"title": "Title One", "upload_date": "20240101", "duration": 60, '
+        '"timestamp": 1704067200, "description": "hi"}')
+    (chan / "unrelated.mp4").write_bytes(b"z")
+    conn = dbmod.connect(str(tmp_path / "t.db"))
+    conn.execute("INSERT INTO videos(id,status,file_path) VALUES('abc123XYZ_-','done','')")
+    conn.commit()
+    fixed = Poller()._repair_missing_paths(conn, media)
+    assert fixed == 1
+    row = conn.execute("SELECT file_path, filesize, title, published, duration FROM videos "
+                       "WHERE id='abc123XYZ_-'").fetchone()
+    assert row["file_path"].endswith(".mp4") and "[abc123XYZ_-]" in row["file_path"]
+    assert row["filesize"] == 100
+    assert row["title"] == "Title One" and row["published"] == 1704067200
+    conn.close()

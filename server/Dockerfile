@@ -1,9 +1,12 @@
 FROM python:3.12-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ffmpeg curl ca-certificates \
+    ffmpeg curl ca-certificates unzip \
  && rm -rf /var/lib/apt/lists/* \
- && pip install --no-cache-dir yt-dlp
+ && pip install --no-cache-dir yt-dlp \
+ && curl -fsSL https://deno.land/install.sh | sh \
+ && ln -s /root/.deno/bin/deno /usr/local/bin/deno \
+ && deno --version && yt-dlp --version
 
 WORKDIR /app
 COPY requirements.txt .

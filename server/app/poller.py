@@ -78,6 +78,7 @@ class Poller:
 
             subs = load_subscriptions(data_dir)
             conn = dbmod.connect(settings.db_path)
+            repaired = self._repair_missing_paths(conn, media_dir)
             discovered = downloaded = failed = 0
             for sub in subs:
                 try:
@@ -93,6 +94,7 @@ class Poller:
                 "subscriptions": len(subs),
                 "discovered": discovered,
                 "downloaded": downloaded,
+                "repaired": repaired,
                 "failed": failed,
                 "at": self.last_run,
             }
@@ -159,9 +161,9 @@ class Poller:
             if not vid or vid.startswith("UC"):
                 continue  # playlist/channel entries, not videos
             disc += 1
-            cur = conn.execute("SELECT status FROM videos WHERE id=?", (vid,)).fetchone()
-            if cur and cur["status"] == "done":
-                continue
+            cur = conn.execute("SELECT status, file_path FROM videos WHERE id=?", (vid,)).fetchone()
+            if cur and cur["status"] == "done" and cur["file_path"]:
+                continue  # done rows with an empty path are re-repaired below
             dbmod.upsert_video(conn, {
                 "id": vid,
                 "channel_id": channel_id,
@@ -174,7 +176,9 @@ class Poller:
             })
             ok, err = download_video(vid, media_dir, archive)
             if ok:
-                files = sorted(media_dir.rglob(f"*{vid}.*"))
+                # NOTE: yt-dlp names files "... [id].mp4" — the id is followed
+                # by "]", so the glob must be *id* (NOT *id.* which matches nothing).
+                files = sorted(p for p in media_dir.rglob(f"*{vid}*") if p.is_file())
                 main = next((p for p in files if p.suffix.lower() in (".mp4", ".mkv", ".webm")), None)
                 thumb = next((p for p in files if p.suffix.lower() in (".jpg", ".webp", ".png")), None)
                 info = next((p for p in files if p.name.endswith(".info.json")), None)
@@ -219,6 +223,34 @@ class Poller:
                 kept.append(v)
         return kept
 
+    def _repair_missing_paths(self, conn: sqlite3.Connection, media_dir: Path) -> int:
+        """Re-link done rows whose file paths were never recorded.
+
+        (The old *id.* glob never matched yt-dlp's [id].ext naming, so early
+        downloads were marked done with empty paths and skipped forever.)
+        Returns the number of rows repaired.
+        """
+        fixed = 0
+        rows = conn.execute(
+            "SELECT id FROM videos WHERE status='done' AND (file_path IS NULL OR file_path='')").fetchall()
+        for row in rows:
+            vid = row["id"]
+            files = sorted(p for p in media_dir.rglob(f"*{vid}*") if p.is_file())
+            main = next((p for p in files if p.suffix.lower() in (".mp4", ".mkv", ".webm")), None)
+            if not main:
+                continue
+            thumb = next((p for p in files if p.suffix.lower() in (".jpg", ".webp", ".png")), None)
+            info = next((p for p in files if p.name.endswith(".info.json")), None)
+            dbmod.mark_downloaded(
+                conn, vid, str(main.relative_to(media_dir)),
+                str(thumb.relative_to(media_dir)) if thumb else "",
+                str(info.relative_to(media_dir)) if info else "",
+                main.stat().st_size if main.exists() else 0,
+            )
+            self._enrich_from_info(conn, vid, info)
+            fixed += 1
+        return fixed
+
     def _enrich_from_info(self, conn: sqlite3.Connection, vid: str, info: Path | None):
         """Backfill accurate metadata from yt-dlp's .info.json.
 
@@ -238,6 +270,34 @@ class Poller:
              d.get("timestamp") or 0, (d.get("description") or "")[:4000], vid),
         )
         conn.commit()
+
+    def _repair_missing_paths(self, conn: sqlite3.Connection, media_dir: Path) -> int:
+        """Re-link done rows whose files exist but were never recorded.
+
+        (Fell out of the old *id.* glob, which can't match [id].ext names.)
+        Returns the number of rows repaired.
+        """
+        n = 0
+        for row in conn.execute(
+                "SELECT id FROM videos WHERE status='done' AND (file_path IS NULL OR file_path='')").fetchall():
+            vid = row["id"]
+            files = sorted(p for p in media_dir.rglob(f"*{vid}*") if p.is_file())
+            main = next((p for p in files if p.suffix.lower() in (".mp4", ".mkv", ".webm")), None)
+            if not main:
+                continue
+            thumb = next((p for p in files if p.suffix.lower() in (".jpg", ".webp", ".png")), None)
+            info = next((p for p in files if p.name.endswith(".info.json")), None)
+            conn.execute(
+                "UPDATE videos SET file_path=?, thumb_path=?, info_path=?, filesize=? WHERE id=?",
+                (str(main.relative_to(media_dir)),
+                 str(thumb.relative_to(media_dir)) if thumb else "",
+                 str(info.relative_to(media_dir)) if info else "",
+                 main.stat().st_size, vid),
+            )
+            self._enrich_from_info(conn, vid, info)
+            n += 1
+        conn.commit()
+        return n
 
     def _prune(self, conn: sqlite3.Connection, media_dir: Path):
         """Delete media files older than keep_days (0 = keep forever).
