@@ -315,18 +315,6 @@ private fun RetentionSlider(days: Int, onPick: (Int) -> Unit) {
 }
 
 @Composable
-private fun RetentionSlider(days: Int, onPick: (Int) -> Unit) {
-    // Snap any legacy value (e.g. from the old linear slider) to the nearest step.
-    val idx = RETENTION_OPTIONS.indices.minByOrNull { kotlin.math.abs(RETENTION_OPTIONS[it] - days) } ?: 0
-    Slider(
-        value = idx.toFloat(),
-        onValueChange = { onPick(RETENTION_OPTIONS[it.toInt().coerceIn(RETENTION_OPTIONS.indices)]) },
-        valueRange = 0f..(RETENTION_OPTIONS.size - 1).toFloat(),
-        steps = RETENTION_OPTIONS.size - 2,
-    )
-}
-
-@Composable
 private fun BackfillRow(selected: Int, onPick: (Int) -> Unit) {
     val options = listOf(0 to "Off", 5 to "5 days", 7 to "7 days", 30 to "30 days", 90 to "90 days")
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {

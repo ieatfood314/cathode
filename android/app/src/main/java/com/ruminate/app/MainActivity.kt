@@ -70,7 +70,6 @@ class MainActivity : ComponentActivity() {
                 var openUri by remember { mutableStateOf<Uri?>(null) }
                 var server by remember { mutableStateOf<ServerSettings?>(null) }
                 var serverDirty by remember { mutableStateOf(false) }
-                var serverDirty by remember { mutableStateOf(false) }
                 var serverLoading by remember { mutableStateOf(false) }
                 var connStatus by remember { mutableStateOf<String?>(null) }
                 var testing by remember { mutableStateOf(false) }
