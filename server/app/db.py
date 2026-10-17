@@ -96,3 +96,50 @@ def mark_failed(conn: sqlite3.Connection, video_id: str, error: str):
 
 def now() -> int:
     return int(time.time())
+
+
+# Server settings persist across container restarts (a restart loses
+# process memory otherwise — see the 0.1.6 restart that reset keep/backfill).
+PERSISTED_SETTINGS = [
+    "poll_mode", "poll_interval_minutes", "max_resolution",
+    "sponsorblock_remove", "sponsorblock_mark", "keep_days",
+    "backfill_days", "delete_after_watched",
+]
+
+
+def save_settings_snapshot(settings_obj) -> None:
+    import json
+    try:
+        conn = sqlite3.connect(str(settings_obj.db_path))
+        conn.execute("CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT)")
+        conn.execute(
+            "INSERT INTO kv(k, v) VALUES('server_settings', ?) "
+            "ON CONFLICT(k) DO UPDATE SET v=excluded.v",
+            (json.dumps({k: getattr(settings_obj, k) for k in PERSISTED_SETTINGS}),),
+        )
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+
+def restore_settings_snapshot(settings_obj) -> None:
+    import json
+    if not Path(settings_obj.db_path).exists():
+        return
+    try:
+        conn = sqlite3.connect(str(settings_obj.db_path))
+        conn.row_factory = sqlite3.Row
+        try:
+            row = conn.execute("SELECT v FROM kv WHERE k='server_settings'").fetchone()
+        except Exception:
+            row = None
+        conn.close()
+        if not row or not row["v"]:
+            return
+        saved = json.loads(row["v"])
+    except Exception:
+        return
+    for k in PERSISTED_SETTINGS:
+        if k in saved and k not in settings_obj.model_fields_set:
+            setattr(settings_obj, k, saved[k])

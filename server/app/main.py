@@ -22,6 +22,12 @@ CHUNK = 1024 * 1024
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Restart-proof user settings: restore whatever was PUT last, unless the
+    # same field was explicitly configured via env (env wins over saved state).
+    try:
+        dbmod.restore_settings_snapshot(settings)
+    except Exception:
+        pass
     poller.start()
     yield
     poller.stop()
@@ -163,6 +169,7 @@ def put_settings(body: SettingsIn):
         settings.backfill_days = max(0, min(3650, body.backfill_days))
     if body.delete_after_watched is not None:
         settings.delete_after_watched = bool(body.delete_after_watched)
+    dbmod.save_settings_snapshot(settings)
     return {"ok": True, "settings": get_settings()}
 
 

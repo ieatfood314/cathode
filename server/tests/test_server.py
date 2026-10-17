@@ -441,3 +441,26 @@ def test_repair_missing_paths(tmp_path, monkeypatch):
     assert row["filesize"] == 100
     assert row["title"] == "Title One" and row["published"] == 1704067200
     conn.close()
+
+
+def test_settings_survive_restore(monkeypatch, tmp_path):
+    """PUT /api/settings must persist and re-apply across restarts."""
+    from app import db as dbmod
+    from app.config import Settings, settings as singleton
+    from app.main import app
+    db_path = str(tmp_path / "t.db")
+    monkeypatch.setattr(singleton, "db_path", db_path)
+    from fastapi.testclient import TestClient
+    c = TestClient(app)
+    r = c.put("/api/settings", json={"keep_days": 10, "backfill_days": 5, "delete_after_watched": True})
+    assert r.json()["settings"]["keep_days"] == 10
+    # Simulate a restart: fresh settings instance, restored from kv.
+    s2 = Settings(_env_file=None)
+    s2.db_path = db_path
+    dbmod.restore_settings_snapshot(s2)
+    assert s2.keep_days == 10 and s2.backfill_days == 5 and s2.delete_after_watched is True
+    # Explicit env in place: saved value must NOT override it.
+    s3 = Settings(_env_file=None, keep_days=3)
+    s3.db_path = db_path
+    dbmod.restore_settings_snapshot(s3)
+    assert s3.keep_days == 3
