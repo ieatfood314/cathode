@@ -103,10 +103,22 @@ function play(v) {
   $('now').textContent = v.title || v.id;
   $('vid').src = '/api/videos/' + v.id + '/stream';
   $('player').style.display = 'block';
+  // Resume where you stopped, like the phone app.
+  if (v.position_seconds > 0 && v.position_seconds < v.duration - 5) {
+    $('vid').addEventListener('loadedmetadata', () => { $('vid').currentTime = v.position_seconds; }, {once: true});
+  }
   $('vid').play().catch(() => {});
   window.scrollTo(0, 0);
 }
-function closePlayer() { $('vid').pause(); $('vid').removeAttribute('src'); $('player').style.display = 'none'; }
+function closePlayer() { if (current) saveProgress(); $('vid').pause(); $('vid').removeAttribute('src'); $('player').style.display = 'none'; }
+let lastSave = 0;
+function saveProgress() {
+  if (!current || !$('vid').src) return;
+  const p = Math.floor($('vid').currentTime || 0);
+  fetch('/api/videos/' + current.id + '/progress', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({position_seconds: p})});
+  current.position_seconds = p;
+}
+setInterval(() => { const v = $('vid'); if (current && !v.paused && !v.ended && Date.now() - lastSave > 10000) { lastSave = Date.now(); saveProgress(); } }, 2000);
 async function markWatched(w) {
   if (!current) return;
   await fetch('/api/videos/' + current.id + '/watched?watched=' + w, {method: 'POST'});

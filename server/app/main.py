@@ -50,7 +50,8 @@ def feed(limit: int = Query(100, le=500), unwatched_only: bool = False,
          channel: str | None = None):
     conn = _conn()
     q = ("SELECT id, channel_id, channel_title, title, upload_date, duration, "
-         "file_path, thumb_path, filesize, status, published, downloaded_at, watched "
+         "file_path, thumb_path, filesize, status, published, downloaded_at, watched, "
+         "CAST(position_seconds AS INTEGER) AS position_seconds "
          "FROM videos WHERE status='done'")
     args: list = []
     if unwatched_only:
@@ -63,6 +64,36 @@ def feed(limit: int = Query(100, le=500), unwatched_only: bool = False,
     rows = [dict(r) for r in conn.execute(q, args).fetchall()]
     conn.close()
     return {"videos": rows}
+
+
+class ProgressIn(BaseModel):
+    position_seconds: int | float | None = None
+
+
+@app.post("/api/videos/{video_id}/progress")
+def save_progress(video_id: str, body: ProgressIn):
+    """Store where playback stopped so it resumes everywhere, from anywhere.
+
+    Also auto-marks watched once you're within the last ~5% of the video,
+    so no manual button is needed.
+    """
+    pos = max(0.0, float(body.position_seconds or 0.0))
+    conn = _conn()
+    row = conn.execute("SELECT duration FROM videos WHERE id=?", (video_id,)).fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(404, "unknown video")
+    auto_watched = False
+    if (row["duration"] or 0) > 0 and pos >= row["duration"] * 0.95 - 5:
+        conn.execute(
+            "UPDATE videos SET position_seconds=?, watched=1 WHERE id=?", (pos, video_id))
+        auto_watched = True
+    else:
+        conn.execute(
+            "UPDATE videos SET position_seconds=?, watched=0 WHERE id=?", (pos, video_id))
+    conn.commit()
+    conn.close()
+    return {"ok": True, "position_seconds": int(pos), "watched": auto_watched}
 
 
 @app.get("/api/videos/{video_id}")

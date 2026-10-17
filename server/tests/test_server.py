@@ -264,11 +264,153 @@ def test_download_flags_exist_in_ytdlp():
     cmd = " ".join(build_download_cmd("https://www.youtube.com/watch?v=x", "/tmp/o", Path("/tmp/a")))
     for flag in ["--continue", "--retries", "--fragment-retries", "--retry-sleep",
                  "--socket-timeout", "--embed-metadata", "--embed-chapters",
-                 "--embed-thumbnail", "--write-info-json", "--write-thumbnail",
+                 "--write-info-json", "--write-thumbnail",
                  "--merge-output-format", "--download-archive", "--sponsorblock-mark",
                  "--sponsorblock-remove", "--sponsorblock-api"]:
         assert flag in cmd, flag
         assert re.search(rf"(^|\s){re.escape(flag)}(\s|,)", help_text), flag
+
+
+def test_no_embedded_thumbnail():
+    """Cover art breaks phone playback: it is added as a second video stream
+    (mjpeg), which ExoPlayer picks as the video track — audio only, no picture.
+    """
+    import shutil as _sh
+    from app.downloader import BASE_FLAGS, build_download_cmd
+    from pathlib import Path
+    assert "--embed-thumbnail" not in BASE_FLAGS
+    assert "--embed-thumbnail" not in " ".join(
+        build_download_cmd("https://www.youtube.com/watch?v=x", "/tmp/o", Path("/tmp/a")))
+    # sanity: the guard test still validates flags only when yt-dlp exists
+    assert _sh.which("yt-dlp") is None or "--embed-thumbnail" not in BASE_FLAGS
+
+
+def test_backfill_strict_beyond_grace(monkeypatch):
+    """Undatable videos past the newest few must NOT download (storage kill)."""
+    import app.downloader as dl
+    from app.poller import Poller
+    monkeypatch.setattr(dl, "fetch_rss_recent", lambda cid: {"new1": "20990101"})
+    monkeypatch.setattr(dl, "resolve_upload_dates",
+                        lambda ids: {"old1": "20000101"} if ids else {})
+    p = Poller()
+    vids = [{"id": f"mystery{i}"} for i in range(20)] + [{"id": "old1"}, {"id": "new1"}]
+    kept = [v["id"] for v in p._apply_backfill("UCchan", vids, 30)]
+    assert all(f"mystery{i}" in kept for i in range(10))   # within grace window
+    assert all(f"mystery{i}" not in kept for i in range(11, 20))  # beyond it
+    assert "old1" not in kept and "new1" in kept
+
+
+def test_progress_roundtrip():
+    """Save playback position; auto-mark watched near the end."""
+    from fastapi.testclient import TestClient
+    from app import db as dbmod
+    from app.config import settings
+    from app.main import app
+    conn = dbmod.connect(settings.db_path)
+    conn.execute("INSERT OR REPLACE INTO videos(id,status,file_path,duration,watched) "
+                 "VALUES('prog1','done','x.mp4',600,0)")
+    conn.execute("INSERT OR REPLACE INTO videos(id,status,file_path,duration,watched) "
+                 "VALUES('prog2','done','y.mp4',600,0)")
+    conn.commit()
+    conn.close()
+    c = TestClient(app)
+    r = c.post("/api/videos/prog1/progress", json={"position_seconds": 123})
+    assert r.status_code == 200 and r.json()["watched"] is False
+    conn = dbmod.connect(settings.db_path)
+    pos = conn.execute("SELECT position_seconds FROM videos WHERE id='prog1'").fetchone()["position_seconds"]
+    conn.close()
+    assert pos == 123
+    rows = [v for v in c.get("/api/feed?limit=500").json()["videos"] if v["id"] == "prog1"]
+    assert rows and rows[0]["position_seconds"] == 123
+    # Near the end (>=95%): auto-watched.
+    r = c.post("/api/videos/prog2/progress", json={"position_seconds": 595})
+    assert r.json()["watched"] is True
+    conn = dbmod.connect(settings.db_path)
+    w = conn.execute("SELECT watched FROM videos WHERE id='prog2'").fetchone()["watched"]
+    conn.close()
+    assert w == 1
+
+
+def test_prune_beyond_backfill(tmp_path, monkeypatch):
+    """One-time cleanup: downloads older than the backfill window are deleted."""
+    from app import db as dbmod
+    from app.config import settings
+    from app.poller import Poller
+    media = tmp_path / "media"
+    chan = media / "Chan"
+    chan.mkdir(parents=True)
+    (chan / "20110101 - Ancient [anc123XYZ_-].mp4").write_bytes(b"v" * 100)
+    (chan / "20990101 - Fresh [fresh123XYZ-].mp4").write_bytes(b"v" * 100)
+    conn = dbmod.connect(str(tmp_path / "t.db"))
+    conn.execute("INSERT INTO videos(id,status,file_path,upload_date) "
+                 "VALUES('anc123XYZ_-','done','Chan/20110101 - Ancient [anc123XYZ_-].mp4','20110101')")
+    conn.execute("INSERT INTO videos(id,status,file_path,upload_date) "
+                 "VALUES('fresh123XYZ-','done','Chan/20990101 - Fresh [fresh123XYZ-].mp4','20990101')")
+    conn.commit()
+    monkeypatch.setattr(settings, "backfill_days", 5)
+    monkeypatch.setattr(settings, "media_dir", str(media))
+    fixed = Poller()._prune_beyond_backfill(conn, media)
+    conn.close()
+    assert fixed == 1
+    assert not chan.exists() or not list(chan.glob("*anc*"))
+    assert (chan / "20990101 - Fresh [fresh123XYZ-].mp4").exists()
+
+
+def test_strip_cover_streams(tmp_path, monkeypatch):
+    """Embedded cover art (second video stream) gets remuxed away.
+
+    Needs ffmpeg; skipped on machines without it (the container ships it).
+    """
+    import shutil
+    if shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None:
+        return
+    from app import db as dbmod
+    from app.config import settings
+    from app.poller import Poller
+    import subprocess
+    media = tmp_path / "media"
+    media.mkdir(parents=True)
+    src = media / "cover1.mp4"
+    subprocess.run(
+        ["ffmpeg", "-y", "-loglevel", "error",
+         "-f", "lavfi", "-i", "testsrc=size=160x120:rate=2",
+         "-f", "lavfi", "-i", "color=c=black:size=160x120:rate=2",
+         "-f", "lavfi", "-i", "sine=frequency=440",
+         "-map", "0:v", "-map", "1:v", "-map", "2:a",
+         "-c:v:0", "libx264", "-c:v:1", "mjpeg", "-c:a", "aac", "-t", "1",
+         str(src)], check=True, capture_output=True)
+    initial = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "v",
+         "-show_entries", "stream=codec_name", "-of", "csv=p=0", str(src)],
+        check=True, capture_output=True, text=True).stdout.strip()
+    assert "h264" in initial and "mjpeg" in initial
+    conn = dbmod.connect(str(tmp_path / "t.db"))
+    conn.execute("INSERT OR REPLACE INTO videos(id,status,file_path) "
+                 "VALUES('cover1','done','cover1.mp4')")
+    conn.commit()
+    monkeypatch.setattr(settings, "media_dir", str(media))
+    fixed = Poller()._strip_cover_streams(conn, media)
+    conn.close()
+    assert fixed == 1
+    codecs = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "v",
+         "-show_entries", "stream=codec_name", "-of", "csv=p=0", str(src)],
+        check=True, capture_output=True, text=True).stdout.strip()
+    assert "h264" in codecs and "mjpeg" not in codecs
+
+
+def test_dateafter_flag_with_backfill(monkeypatch):
+    from pathlib import Path
+    from app import config
+    from app.downloader import backfill_dateafter, build_download_cmd
+    monkeypatch.setattr(config.settings, "backfill_days", 5)
+    da = backfill_dateafter()
+    assert da == "now-5daysago"
+    assert da in build_download_cmd("https://www.youtube.com/watch?v=x", "/tmp/o", Path("/tmp/a"), dateafter=da)
+    monkeypatch.setattr(config.settings, "backfill_days", 0)
+    assert backfill_dateafter() is None
+    cmd = build_download_cmd("https://www.youtube.com/watch?v=x", "/tmp/o", Path("/tmp/a"))
+    assert "--dateafter" not in cmd
 
 
 def test_repair_missing_paths(tmp_path, monkeypatch):

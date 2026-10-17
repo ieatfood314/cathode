@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS videos (
   published INTEGER DEFAULT 0,
   downloaded_at INTEGER DEFAULT 0,
   watched INTEGER DEFAULT 0,
+  position_seconds REAL DEFAULT 0,
   FOREIGN KEY(channel_id) REFERENCES channels(id)
 );
 CREATE TABLE IF NOT EXISTS kv (
@@ -43,7 +44,16 @@ def connect(db_path: str) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
+    _migrate(conn)
     return conn
+
+
+def _migrate(conn: sqlite3.Connection):
+    """Light ALTERs for databases created before a column existed."""
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(videos)")}
+    if "position_seconds" not in cols:
+        conn.execute("ALTER TABLE videos ADD COLUMN position_seconds REAL DEFAULT 0")
+        conn.commit()
 
 
 def upsert_channel(conn: sqlite3.Connection, channel_id: str, url: str, title: str | None = None):

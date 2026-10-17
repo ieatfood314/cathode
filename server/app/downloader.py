@@ -9,6 +9,11 @@ Resume strategy (matters on flaky Wi-Fi / server side):
 - --socket-timeout 30
 SponsorBlock: remove only sponsor/selfpromo/interaction (unambiguous ads),
 mark everything else as chapters (mark is instant, remove re-encodes).
+
+Thumbnails are written as sidecar .jpg files (for /api/thumbs) but NOT
+embedded into the mp4: --embed-thumbnail adds a cover-art "video" stream
+(mjpeg) to the container, and ExoPlayer picks it as the video track on the
+phone — audio plays, video shows black. Never re-add it.
 """
 
 import json
@@ -30,7 +35,6 @@ BASE_FLAGS = [
     "--concurrent-fragments", "4",
     "--embed-metadata",
     "--embed-chapters",
-    "--embed-thumbnail",
     "--convert-thumbnails", "jpg",
     "--write-info-json",
     "--write-thumbnail",
@@ -47,7 +51,14 @@ def format_selector(max_res: int) -> str:
     )
 
 
-def build_download_cmd(video_url: str, out_tmpl: str, archive: Path) -> list[str]:
+def backfill_dateafter() -> str | None:
+    """yt-dlp date window matching the configured backfill (None = off)."""
+    days = max(0, settings.backfill_days or 0)
+    return f"now-{days}daysago" if days > 0 else None
+
+
+def build_download_cmd(video_url: str, out_tmpl: str, archive: Path,
+                       dateafter: str | None = None) -> list[str]:
     cmd = [
         "yt-dlp",
         *BASE_FLAGS,
@@ -60,6 +71,11 @@ def build_download_cmd(video_url: str, out_tmpl: str, archive: Path) -> list[str
                 "--sponsorblock-chapter-title", "[SponsorBlock]: %(category_names)l"]
     if settings.sponsorblock_remove:
         cmd += ["--sponsorblock-remove", settings.sponsorblock_remove]
+    if dateafter:
+        # Authoritative enforcement of the backfill window using yt-dlp's own
+        # upload-date metadata — belt and braces for the pre-filter in the
+        # poller (which works off RSS/batched dates).
+        cmd += ["--dateafter", dateafter]
     return cmd + [
         "-f", format_selector(settings.max_resolution),
         "--download-archive", str(archive),
@@ -113,10 +129,11 @@ def resolve_channel_id(channel_url: str) -> tuple[str | None, str | None]:
 
 
 def download_video(video_id: str, media_dir: Path, archive: Path,
-                   log: Callable[[str], None] | None = None) -> tuple[bool, str]:
+                   log: Callable[[str], None] | None = None,
+                   dateafter: str | None = None) -> tuple[bool, str]:
     out_tmpl = str(media_dir / "%(channel)s/%(upload_date)s - %(title)s [%(id)s].%(ext)s")
     url = f"https://www.youtube.com/watch?v={video_id}"
-    cmd = build_download_cmd(url, out_tmpl, archive)
+    cmd = build_download_cmd(url, out_tmpl, archive, dateafter=dateafter)
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
         if log:
