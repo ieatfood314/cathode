@@ -50,6 +50,19 @@ fun fetchFeed(baseUrl: String, unwatchedOnly: Boolean = false): List<Video> {
     }
 }
 
+/** Tell the server where playback stopped so this video resumes — on this
+ *  phone, across app restarts, and anywhere else that opens the same library.
+ *  Returns true when the server marked it watched (past ~95%). */
+fun putProgress(baseUrl: String, videoId: String, positionSeconds: Int): Boolean {
+    val body = "{\"position_seconds\":$positionSeconds}".toRequestBody("application/json".toMediaType())
+    baseClient().newCall(
+        Request.Builder().url("$baseUrl/api/videos/$videoId/progress").post(body).build()
+    ).execute().use { resp ->
+        if (!resp.isSuccessful) return false
+        return resp.body?.string()?.contains("\"watched\":true") == true
+    }
+}
+
 fun triggerServerPoll(baseUrl: String): String {
     baseClient().newCall(
         Request.Builder().url("$baseUrl/api/subscriptions/refresh").post(ByteArray(0).toRequestBody(null)).build()

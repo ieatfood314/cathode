@@ -37,6 +37,7 @@ import com.ruminate.app.data.fetchFeed
 import com.ruminate.app.data.getServerSettings
 import com.ruminate.app.data.isUnmetered
 import com.ruminate.app.data.putServerSettings
+import com.ruminate.app.data.putProgress
 import com.ruminate.app.data.resolveStore
 import com.ruminate.app.ui.LibraryScreen
 import com.ruminate.app.ui.PlayerScreen
@@ -253,11 +254,18 @@ class MainActivity : ComponentActivity() {
                                 saveState = saveStates[open!!.id]
                                     ?: OfflineRepo.stateOf(open!!.id),
                                 showSave = prefs.saveOnPhone && !wifiBlocked,
-                                onSave = { saveVideo(open!!) },
-                                onRemoveSaved = {
-                                    val id = open!!.id
-                                    scope.launch(Dispatchers.IO) {
-                                        OfflineRepo.remove(appContext, store, id)
+                                onProgress = { pos ->
+                                    // Fire-and-forget; server also auto-watches past ~95%.
+                                    val v = open
+                                    if (v == null || !canUseNetwork) false else {
+                                        scope.launch(Dispatchers.IO) {
+                                            runCatching {
+                                                if (putProgress(prefs.serverUrl, v.id, pos)) {
+                                                    withContext(Dispatchers.Main) { refresh() }
+                                                }
+                                            }
+                                        }
+                                        false
                                     }
                                 },
                                 onWatched = {
@@ -290,15 +298,6 @@ class MainActivity : ComponentActivity() {
                                     refresh()
                                 },
                                 onOpen = { open = it; tab = 2 },
-                                onToggleWatched = { open = it; tab = 2 },
-                                onSave = { saveVideo(it) },
-                                onRemoveSaved = {
-                                    val id = it.id
-                                    scope.launch(Dispatchers.IO) {
-                                        OfflineRepo.remove(appContext, store, id)
-                                    }
-                                },
-                                onSaveAll = { videos.forEach { saveVideo(it) } },
                             )
                             tab == 1 -> SubscriptionsScreen(serverUrl = prefs.serverUrl)
                             tab == 3 -> SettingsScreen(

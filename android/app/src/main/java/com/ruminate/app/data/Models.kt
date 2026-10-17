@@ -18,6 +18,7 @@ data class Video(
     val published: Long = 0,
     @SerialName("downloaded_at") val downloadedAt: Long = 0,
     val watched: Int = 0,
+    @SerialName("position_seconds") val positionSeconds: Int = 0,
 )
 
 @Serializable
