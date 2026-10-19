@@ -25,9 +25,13 @@
             android:authorities="${applicationId}.androidx-startup"
             tools:node="remove" />
 
+        <!-- configChanges keeps the Activity alive through the player's
+             orientation change: without it, requesting landscape recreated the
+             whole activity, killing the in-flight video (fullscreen broke). -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode"
             android:theme="@style/Theme.Ruminate">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

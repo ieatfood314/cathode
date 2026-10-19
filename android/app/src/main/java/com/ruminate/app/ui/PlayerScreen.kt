@@ -16,7 +16,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -35,18 +37,12 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
-import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.datasource.DefaultDataSource
-import androidx.media3.datasource.DefaultHttpDataSource
-import androidx.media3.datasource.cache.CacheDataSource
-import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
 import com.ruminate.app.data.SaveState
 import com.ruminate.app.data.Video
-import com.ruminate.app.player.PlayerHolder
+import com.ruminate.app.player.Playback
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 
@@ -60,6 +56,7 @@ fun PlayerScreen(
     savedUri: Uri?,
     saveState: SaveState,
     showSave: Boolean,
+    onClose: () -> Unit,
     onProgress: (positionSeconds: Int) -> Boolean,
     onWatched: () -> Unit,
 ) {
@@ -67,9 +64,13 @@ fun PlayerScreen(
     val activity = context as? Activity
     var fullscreen by remember { mutableStateOf(false) }
 
-    // Saved file plays straight from storage (zero network). Otherwise stream
-    // through the playback cache. Keyed on both so save-while-watching
-    // switches sources cleanly.
+    // The player lives in Playback (outlives this screen), so browsing other
+    // tabs never stops playback. Only a video/source switch or an explicit
+    // close tears it down. Saved file plays straight from storage (zero
+    // network); otherwise stream through the playback cache. Note: when the
+    // local file finishes resolving a beat after first composition
+    // (savedUri null -> uri), ensure() swaps players here, and the AndroidView
+    // below rebinds via `update` — the old detached-player black screen.
     val player = remember(streamUrl, savedUri, video.id) {
         // Finished videos start over; everything else resumes exactly where
         // playback last stopped — across app restarts and other videos in
@@ -78,39 +79,20 @@ fun PlayerScreen(
             video.positionSeconds >= video.duration * RESUME_WINDOW
         val resumeMs = if (video.watched == 1 || nearEnd) 0L
         else video.positionSeconds.coerceAtLeast(0) * 1000L
-        if (savedUri != null) {
-            ExoPlayer.Builder(context)
-                .setMediaSourceFactory(
-                    DefaultMediaSourceFactory(DefaultDataSource.Factory(context))
-                )
-                .build()
-        } else {
-            val upstream = DefaultHttpDataSource.Factory()
-                .setConnectTimeoutMs(30_000).setReadTimeoutMs(60_000)
-                .setAllowCrossProtocolRedirects(true)
-            val sourceFactory = DefaultMediaSourceFactory(
-                CacheDataSource.Factory()
-                    .setCache(PlayerHolder.getCache(context))
-                    .setUpstreamDataSourceFactory(upstream)
-            )
-            ExoPlayer.Builder(context).setMediaSourceFactory(sourceFactory).build()
-        }.apply {
-            setMediaItem(MediaItem.fromUri(savedUri ?: Uri.parse(streamUrl)))
-            if (resumeMs > 0) seekTo(resumeMs)
-            prepare()
-            playWhenReady = true
-        }
+        Playback.ensure(context, video.id, streamUrl, savedUri, resumeMs)
     }
 
-    DisposableEffect(streamUrl, savedUri) {
-        onDispose { player.release() }
-    }
-
-    // Save progress on leaving (tab switch, back, app close): dispose runs
-    // before the release above, so the player is still readable.
+    // Save progress on leaving (tab switch, app close): the player outlives
+    // the screen but may already have been switched/released during the same
+    // recomposition, so guard the read. Order: this disposal runs before the
+    // text above can matter — flush whatever we can read.
     DisposableEffect(player, video.id) {
         onDispose {
-            onProgress((player.currentPosition.coerceAtLeast(0) / 1000L).toInt())
+            // A released player throws on reads; -1 means it was already
+            // switched/closed elsewhere and the caller already flushed the
+            // real position — skip rather than overwrite progress with 0.
+            val pos = runCatching { player.currentPosition.coerceAtLeast(0) }.getOrDefault(-1L)
+            if (pos >= 0) onProgress((pos / 1000L).toInt())
         }
     }
     // ...and every 5s while playing.
@@ -118,8 +100,11 @@ fun PlayerScreen(
         var lastSaved = -1
         while (isActive) {
             delay(5_000)
-            if (player.isPlaying) {
-                val p = (player.currentPosition.coerceAtLeast(0) / 1000L).toInt()
+            val playing = runCatching { player.isPlaying }.getOrDefault(false)
+            if (playing) {
+                val p = runCatching {
+                    player.currentPosition.coerceAtLeast(0) / 1000L
+                }.getOrDefault(0L).toInt()
                 if (p != lastSaved) {
                     lastSaved = p
                     onProgress(p)
@@ -135,15 +120,18 @@ fun PlayerScreen(
             }
         }
         player.addListener(listener)
-        onDispose { player.removeListener(listener) }
+        onDispose { runCatching { player.removeListener(listener) } }
     }
 
     // Fullscreen: immersive + sensor landscape while active; hook up
     // PlayerView's native fullscreen button and restore on dispose.
+    // The dispose branch restores unconditionally (no fullscreen check):
+    // reads inside onDispose see the CURRENT state, so a fullscreen=true
+    // exit path would otherwise never restore system bars/orientation.
     DisposableEffect(activity, fullscreen) {
         val window = activity?.window
         if (fullscreen && window != null) {
-            activity!!.requestedOrientation =
+            activity?.requestedOrientation =
                 ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
             WindowCompat.setDecorFitsSystemWindows(window, false)
             WindowInsetsControllerCompat(window, window.decorView).apply {
@@ -153,11 +141,14 @@ fun PlayerScreen(
             }
         }
         onDispose {
-            if (fullscreen && window != null) {
-                activity!!.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-                WindowCompat.setDecorFitsSystemWindows(window, true)
-                WindowInsetsControllerCompat(window, window.decorView)
-                    .show(WindowInsetsCompat.Type.systemBars())
+            if (window != null) {
+                runCatching {
+                    activity?.requestedOrientation =
+                        ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+                    WindowCompat.setDecorFitsSystemWindows(window, true)
+                    WindowInsetsControllerCompat(window, window.decorView)
+                        .show(WindowInsetsCompat.Type.systemBars())
+                }
             }
         }
     }
@@ -175,6 +166,10 @@ fun PlayerScreen(
                     setFullscreenButtonClickListener { want -> fullscreen = want }
                 }
             },
+            // Rebind whenever `player` changes (source swap, re-entry):
+            // factory runs once, so without this the view would hold the old,
+            // released player — black screen while audio played on.
+            update = { view -> if (view.player !== player) view.player = player },
             modifier = if (fullscreen) {
                 Modifier.fillMaxSize()
             } else {
@@ -184,6 +179,17 @@ fun PlayerScreen(
                     .align(Alignment.TopCenter)
             },
         )
+        IconButton(
+            onClick = onClose,
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(4.dp),
+        ) {
+            Icon(
+                Icons.Default.Close, contentDescription = "Close player",
+                tint = Color.White,
+            )
+        }
         if (!fullscreen) {
             Column(
                 Modifier
@@ -221,7 +227,8 @@ fun PlayerScreen(
                     Text(
                         "Resumes where you stopped — switching videos or restarting " +
                             "the app never loses your place. Tap the fullscreen button " +
-                            "in the player for landscape.",
+                            "in the player for landscape; audio keeps going if you " +
+                            "browse other tabs.",
                         style = MaterialTheme.typography.bodySmall, color = Color.Gray,
                     )
                 }

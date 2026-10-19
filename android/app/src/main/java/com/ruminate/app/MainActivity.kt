@@ -39,6 +39,7 @@ import com.ruminate.app.data.isUnmetered
 import com.ruminate.app.data.putServerSettings
 import com.ruminate.app.data.putProgress
 import com.ruminate.app.data.resolveStore
+import com.ruminate.app.player.Playback
 import com.ruminate.app.ui.LibraryScreen
 import com.ruminate.app.ui.PlayerScreen
 import com.ruminate.app.ui.RuminateTheme
@@ -138,6 +139,36 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
+                // Shared by the player's periodic saver, leaving the player
+                // screen, closing a video, and video switches: PUT tail
+                // progress; server also auto-watches past ~95%.
+                fun submitProgress(v: Video, pos: Int): Boolean {
+                    if (!canUseNetwork) return false
+                    scope.launch(Dispatchers.IO) {
+                        runCatching {
+                            if (putProgress(prefs.serverUrl, v.id, pos)) {
+                                withContext(Dispatchers.Main) { refresh() }
+                            }
+                        }
+                    }
+                    return true
+                }
+
+                // Nav taps keep `open` (and playback) alive: audio continues
+                // while you browse other tabs. Only the X in the player
+                // closes a video.
+                fun closeVideo() {
+                    val v = open
+                    val p = Playback.current
+                    if (v != null && p != null && Playback.videoId == v.id) {
+                        submitProgress(v, (p.currentPosition.coerceAtLeast(0) / 1000L).toInt())
+                    }
+                    // The screen's dispose-saver sees a released player and skips.
+                    Playback.close()
+                    open = null
+                    tab = 0
+                }
+
                 fun loadServer() {
                     if (prefs.serverUrl.isBlank()) return
                     if (prefs.wifiOnly && !isUnmetered(this@MainActivity)) {
@@ -227,11 +258,11 @@ class MainActivity : ComponentActivity() {
                     bottomBar = {
                         NavigationBar {
                             NavigationBarItem(
-                                selected = tab == 0, onClick = { tab = 0; open = null },
+                                selected = tab == 0, onClick = { tab = 0 },
                                 icon = { Icon(Icons.Default.Home, null) }, label = { Text0("Library") },
                             )
                             NavigationBarItem(
-                                selected = tab == 1, onClick = { tab = 1; open = null },
+                                selected = tab == 1, onClick = { tab = 1 },
                                 icon = { Icon(Icons.Default.Subscriptions, null) }, label = { Text0("Channels") },
                             )
                             NavigationBarItem(
@@ -247,26 +278,17 @@ class MainActivity : ComponentActivity() {
                 ) { pad ->
                     androidx.compose.foundation.layout.Box(Modifier.padding(pad)) {
                         when {
-                            open != null && tab != 3 -> PlayerScreen(
+                            open != null && tab == 2 -> PlayerScreen(
                                 video = open!!,
                                 streamUrl = streamUrl(open!!),
                                 savedUri = openUri,
                                 saveState = saveStates[open!!.id]
                                     ?: OfflineRepo.stateOf(open!!.id),
                                 showSave = prefs.saveOnPhone && !wifiBlocked,
+                                onClose = { closeVideo() },
                                 onProgress = { pos ->
-                                    // Fire-and-forget; server also auto-watches past ~95%.
                                     val v = open
-                                    if (v == null || !canUseNetwork) false else {
-                                        scope.launch(Dispatchers.IO) {
-                                            runCatching {
-                                                if (putProgress(prefs.serverUrl, v.id, pos)) {
-                                                    withContext(Dispatchers.Main) { refresh() }
-                                                }
-                                            }
-                                        }
-                                        false
-                                    }
+                                    if (v == null) false else submitProgress(v, pos)
                                 },
                                 onWatched = {
                                     val v = open!!
@@ -297,7 +319,24 @@ class MainActivity : ComponentActivity() {
                                     SyncWorker.runOnOpen(this@MainActivity)
                                     refresh()
                                 },
-                                onOpen = { open = it; tab = 2 },
+                                onOpen = { v ->
+                                    // Flush tail progress of whatever was playing
+                                    // first: the switch below releases that player.
+                                    val prev = open
+                                    val prevPlayer = Playback.current
+                                    if (prev != null && prevPlayer != null &&
+                                        Playback.videoId == prev.id
+                                    ) {
+                                        val pos = (prevPlayer.currentPosition
+                                            .coerceAtLeast(0) / 1000L).toInt()
+                                        submitProgress(prev, pos)
+                                    }
+                                    // Don't let the previous video's file URI briefly
+                                    // feed the new one before rescanning resolves it.
+                                    openUri = null
+                                    open = v
+                                    tab = 2
+                                },
                             )
                             tab == 1 -> SubscriptionsScreen(serverUrl = prefs.serverUrl)
                             tab == 3 -> SettingsScreen(
@@ -340,15 +379,16 @@ class MainActivity : ComponentActivity() {
                                         val (n, b) = OfflineRepo.rescan(appContext, store)
                                         withContext(Dispatchers.Main) { updatePhoneSummary(n, b) }
                                     }
-                                },
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
+                                 },
+                             )
+                             else -> androidx.compose.material3.Text("Nothing playing.")
+                         }
+                     }
+                 }
+             }
+         }
+     }
+ }
 
 @androidx.compose.runtime.Composable
 private fun Text0(s: String) {
