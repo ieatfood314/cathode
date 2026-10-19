@@ -91,7 +91,8 @@ class Poller:
                     discovered += r[0]
                     downloaded += r[1]
                     failed += r[2]
-                except Exception:
+                except Exception as e:
+                    print(f"ruminate: scan failed for {sub.source_url}: {e!r}", flush=True)
                     continue
             conn.close()
             self.last_run = int(time.time())
@@ -128,8 +129,9 @@ class Poller:
     def _guarded_scan(self):
         try:
             self.scan_once()
-        except Exception:
-            pass
+        except Exception as e:
+            import traceback
+            print("ruminate: poller task crashed:", traceback.format_exc(), flush=True)
 
     def _scan_subscription(self, conn: sqlite3.Connection, sub: Subscription,
                            media_dir: Path, archive: Path) -> tuple[int, int, int]:
@@ -148,6 +150,10 @@ class Poller:
         candidates: list[str] = []
         if channel_id:
             candidates.append(f"https://www.youtube.com/channel/{channel_id}/videos")
+            # Live-first channels (The WAN Show and other podcasts) have no
+            # /videos tab — their uploads are archived streams under /streams.
+            # Only consulted when /videos comes up empty.
+            candidates.append(f"https://www.youtube.com/channel/{channel_id}/streams")
         src = (sub.source_url or "").rstrip("/")
         if src and "feeds/videos.xml" not in src and src not in candidates:
             candidates.append(f"{src}/videos" if not src.endswith("/videos") else src)

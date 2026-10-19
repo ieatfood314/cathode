@@ -141,5 +141,5 @@ def restore_settings_snapshot(settings_obj) -> None:
     except Exception:
         return
     for k in PERSISTED_SETTINGS:
-        if k in saved and k not in settings_obj.model_fields_set:
+        if k in saved:
             setattr(settings_obj, k, saved[k])
