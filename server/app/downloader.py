@@ -52,9 +52,14 @@ def format_selector(max_res: int) -> str:
 
 
 def backfill_dateafter() -> str | None:
-    """yt-dlp date window matching the configured backfill (None = off)."""
+    """yt-dlp date window matching the configured backfill (None = off).
+
+    yt-dlp's relative date grammar is "now-Ndays" (today/yesterday/now
+    minus N day|week|month|year units) — "daysago" is NOT valid and
+    aborts every download.
+    """
     days = max(0, settings.backfill_days or 0)
-    return f"now-{days}daysago" if days > 0 else None
+    return f"now-{days}days" if days > 0 else None
 
 
 def build_download_cmd(video_url: str, out_tmpl: str, archive: Path,

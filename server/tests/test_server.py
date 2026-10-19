@@ -405,7 +405,7 @@ def test_dateafter_flag_with_backfill(monkeypatch):
     from app.downloader import backfill_dateafter, build_download_cmd
     monkeypatch.setattr(config.settings, "backfill_days", 5)
     da = backfill_dateafter()
-    assert da == "now-5daysago"
+    assert da == "now-5days"
     assert da in build_download_cmd("https://www.youtube.com/watch?v=x", "/tmp/o", Path("/tmp/a"), dateafter=da)
     monkeypatch.setattr(config.settings, "backfill_days", 0)
     assert backfill_dateafter() is None
