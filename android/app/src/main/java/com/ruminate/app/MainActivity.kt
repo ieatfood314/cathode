@@ -1,5 +1,6 @@
 package com.ruminate.app
 
+import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -40,12 +41,15 @@ import com.ruminate.app.data.putServerSettings
 import com.ruminate.app.data.putProgress
 import com.ruminate.app.data.resolveStore
 import com.ruminate.app.player.Playback
+import com.ruminate.app.player.PlaybackService
 import com.ruminate.app.ui.LibraryScreen
 import com.ruminate.app.ui.PlayerScreen
 import com.ruminate.app.ui.RuminateTheme
 import com.ruminate.app.ui.SettingsScreen
 import com.ruminate.app.ui.SubscriptionsScreen
 import com.ruminate.app.ui.formatBytes
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.ui.unit.dp
 import com.ruminate.app.worker.SyncWorker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
@@ -70,6 +74,9 @@ class MainActivity : ComponentActivity() {
                 var loading by remember { mutableStateOf(false) }
                 var open: Video? by remember { mutableStateOf(null) }
                 var openUri by remember { mutableStateOf<Uri?>(null) }
+                // Hoisted from PlayerScreen: fullscreen hides the nav bar so
+                // the video fills the whole screen edge-to-edge.
+                var playerFullscreen by remember { mutableStateOf(false) }
                 var server by remember { mutableStateOf<ServerSettings?>(null) }
                 var serverDirty by remember { mutableStateOf(false) }
                 var serverLoading by remember { mutableStateOf(false) }
@@ -165,6 +172,7 @@ class MainActivity : ComponentActivity() {
                     }
                     // The screen's dispose-saver sees a released player and skips.
                     Playback.close()
+                    stopService(Intent(this@MainActivity, PlaybackService::class.java))
                     open = null
                     tab = 0
                 }
@@ -256,7 +264,8 @@ class MainActivity : ComponentActivity() {
 
                 Scaffold(
                     bottomBar = {
-                        NavigationBar {
+                        // Hidden in fullscreen so the video fills the screen.
+                        if (!playerFullscreen) NavigationBar {
                             NavigationBarItem(
                                 selected = tab == 0, onClick = { tab = 0 },
                                 icon = { Icon(Icons.Default.Home, null) }, label = { Text0("Library") },
@@ -276,7 +285,11 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 ) { pad ->
-                    androidx.compose.foundation.layout.Box(Modifier.padding(pad)) {
+                    // Fullscreen: no Scaffold insets — the player needs the
+                    // whole window (already edge-to-edge via
+                    // setDecorFitsSystemWindows(false) in PlayerScreen).
+                    val contentPad = if (playerFullscreen) PaddingValues(0.dp) else pad
+                    androidx.compose.foundation.layout.Box(Modifier.padding(contentPad)) {
                         when {
                             open != null && tab == 2 -> PlayerScreen(
                                 video = open!!,
@@ -285,6 +298,8 @@ class MainActivity : ComponentActivity() {
                                 saveState = saveStates[open!!.id]
                                     ?: OfflineRepo.stateOf(open!!.id),
                                 showSave = prefs.saveOnPhone && !wifiBlocked,
+                                fullscreen = playerFullscreen,
+                                onFullscreenChange = { playerFullscreen = it },
                                 onClose = { closeVideo() },
                                 onProgress = { pos ->
                                     val v = open
@@ -336,6 +351,11 @@ class MainActivity : ComponentActivity() {
                                     openUri = null
                                     open = v
                                     tab = 2
+                                    // Keep the media session reachable from
+                                    // Android's media player outside the app.
+                                    startForegroundService(
+                                        Intent(this@MainActivity, PlaybackService::class.java)
+                                    )
                                 },
                             )
                             tab == 1 -> SubscriptionsScreen(serverUrl = prefs.serverUrl)

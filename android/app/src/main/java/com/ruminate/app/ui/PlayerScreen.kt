@@ -56,13 +56,15 @@ fun PlayerScreen(
     savedUri: Uri?,
     saveState: SaveState,
     showSave: Boolean,
+    // Hoisted to MainActivity so it can hide the nav bar while fullscreen.
+    fullscreen: Boolean,
+    onFullscreenChange: (Boolean) -> Unit,
     onClose: () -> Unit,
     onProgress: (positionSeconds: Int) -> Boolean,
     onWatched: () -> Unit,
 ) {
     val context = LocalContext.current
     val activity = context as? Activity
-    var fullscreen by remember { mutableStateOf(false) }
 
     // The player lives in Playback (outlives this screen), so browsing other
     // tabs never stops playback. Only a video/source switch or an explicit
@@ -163,7 +165,7 @@ fun PlayerScreen(
                 PlayerView(ctx).apply {
                     this.player = player
                     useController = true
-                    setFullscreenButtonClickListener { want -> fullscreen = want }
+                    setFullscreenButtonClickListener { want -> onFullscreenChange(want) }
                 }
             },
             // Rebind whenever `player` changes (source swap, re-entry):
