@@ -13,8 +13,10 @@ android {
         applicationId = "com.ruminate.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 9
-        versionName = "0.1.8"
+        // CI overrides the code per-build so every main push yields a newer
+        // install than the last, without touching this file.
+        versionCode = System.getenv("RUMINATE_VERSION_CODE")?.toIntOrNull() ?: 10
+        versionName = System.getenv("RUMINATE_VERSION_NAME") ?: "0.1.9"
     }
 
     buildTypes {

@@ -1,0 +1,65 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  server-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r server/requirements.txt pytest httpx
+      - run: PYTHONPATH=server pytest server/tests -q
+
+  android-debug:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v3
+      - run: cd android && gradle assembleDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ruminate-debug-apk
+          path: android/app/build/outputs/apk/debug/*.apk
+
+  android-release:
+    # Every push to main publishes a newer install (versionCode follows the
+    # run number) to a rolling release tagged `apk`, which Obtainium tracks.
+    if: github.event_name == 'push'
+    needs: server-tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v3
+      - name: Decode keystore
+        run: echo "${{ secrets.RUMINATE_KEYSTORE_B64 }}" | base64 -d > "$GITHUB_WORKSPACE/ruminate-release.jks"
+      - name: Build signed release APK
+        env:
+          RUMINATE_KEYSTORE_PATH: ${{ github.workspace }}/ruminate-release.jks
+          RUMINATE_KEYSTORE_PASSWORD: ${{ secrets.RUMINATE_KEYSTORE_PASSWORD }}
+          RUMINATE_KEY_ALIAS: ${{ secrets.RUMINATE_KEY_ALIAS }}
+          RUMINATE_KEY_PASSWORD: ${{ secrets.RUMINATE_KEY_PASSWORD }}
+          RUMINATE_VERSION_CODE: ${{ 1000 + github.run_number }}
+        run: cd android && gradle assembleRelease --no-daemon
+      - name: Publish to rolling `apk` release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create apk android/app/build/outputs/apk/release/app-release.apk \
+            --title "Ruminate APK (auto)" \
+            --notes "Auto-built from main at ${{ github.sha }}" \
+            --target ${{ github.sha }} \
+          || gh release upload apk android/app/build/outputs/apk/release/app-release.apk --clobber
