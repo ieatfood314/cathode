@@ -14,6 +14,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r server/requirements.txt pytest httpx
+      - run: sudo mkdir -p /data /media && sudo chmod 777 /data /media
       - run: PYTHONPATH=server pytest server/tests -q
 
   android-debug:
