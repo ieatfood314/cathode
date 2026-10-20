@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -36,9 +37,10 @@ jobs:
           path: android/app/build/outputs/apk/debug/*.apk
 
   android-release:
-    # Every push to main publishes a newer install (versionCode follows the
-    # run number) to a rolling release tagged `apk`, which Obtainium tracks.
-    if: github.event_name == 'push'
+    # Every push to main feeds a rolling release tagged `apk` (Obtainium
+    # tracks it). Skipped silently if the signing secret isn't configured
+    # (e.g. forks) — tests and the debug APK still run.
+    if: github.event_name != 'pull_request'
     needs: server-tests
     runs-on: ubuntu-latest
     steps:
@@ -49,10 +51,14 @@ jobs:
           java-version: "17"
       - uses: gradle/actions/setup-gradle@v3
       - name: Decode keystore
-        run: echo "${{ secrets.RUMINATE_KEYSTORE_B64 }}" | base64 -d > "$GITHUB_WORKSPACE/ruminate-release.jks"
+        run: |
+          echo "${{ secrets.RUMINATE_KEYSTORE_B64 }}" | head -c 1 | grep -q . || echo "SKIP_RELEASE=true" >> "$GITHUB_ENV"
+          echo "${{ secrets.RUMINATE_KEYSTORE_B64 }}" | base64 -d > "$GITHUB_WORKSPACE/ruminate-release.jks" || true
       - name: Compute build number
+        if: env.SKIP_RELEASE != 'true'
         run: echo "RUMINATE_VERSION_CODE=$(( 1000 + ${{ github.run_number }} ))" >> "$GITHUB_ENV"
       - name: Build signed release APK
+        if: env.SKIP_RELEASE != 'true'
         env:
           RUMINATE_KEYSTORE_PATH: ${{ github.workspace }}/ruminate-release.jks
           RUMINATE_KEYSTORE_PASSWORD: ${{ secrets.RUMINATE_KEYSTORE_PASSWORD }}
@@ -60,11 +66,16 @@ jobs:
           RUMINATE_KEY_PASSWORD: ${{ secrets.RUMINATE_KEY_PASSWORD }}
         run: cd android && gradle assembleRelease --no-daemon
       - name: Publish to rolling `apk` release
+        if: env.SKIP_RELEASE != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create apk android/app/build/outputs/apk/release/app-release.apk \
+            --target ${{ github.sha }} \
             --title "Ruminate APK (auto)" \
             --notes "Auto-built from main at ${{ github.sha }}" \
-            --target ${{ github.sha }} \
-          || gh release upload apk android/app/build/outputs/apk/release/app-release.apk --clobber
+          || true
+          gh release upload apk android/app/build/outputs/apk/release/app-release.apk --clobber
+          gh release edit apk \
+            --title "Ruminate APK (auto)" \
+            --notes "Auto-built from main at [${GITHUB_SHA::7}](https://github.com/${{ github.repository }}/commit/${{ github.sha }}). Install with Obtainium (add source ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}) or grab this APK directly."
