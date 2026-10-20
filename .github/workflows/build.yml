@@ -76,6 +76,8 @@ jobs:
             --notes "Auto-built from main at ${{ github.sha }}" \
           || true
           gh release upload apk android/app/build/outputs/apk/release/app-release.apk --clobber
+          git tag -f apk HEAD
+          git push --force origin refs/tags/apk:refs/tags/apk
           gh release edit apk \
             --title "Ruminate APK (auto)" \
             --notes "Auto-built from main at [${GITHUB_SHA::7}](https://github.com/${{ github.repository }}/commit/${{ github.sha }}). Install with Obtainium (add source ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}) or grab this APK directly."
