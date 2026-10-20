@@ -140,6 +140,9 @@ def restore_settings_snapshot(settings_obj) -> None:
         saved = json.loads(row["v"])
     except Exception:
         return
+    # Fields explicitly provided (constructor args or RUMINATE_* env) are the
+    # operator's truth and must not be overwritten by the saved snapshot.
+    provided = getattr(settings_obj, "model_fields_set", set())
     for k in PERSISTED_SETTINGS:
-        if k in saved:
+        if k in saved and k not in provided:
             setattr(settings_obj, k, saved[k])
