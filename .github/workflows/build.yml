@@ -46,13 +46,14 @@ jobs:
       - uses: gradle/actions/setup-gradle@v3
       - name: Decode keystore
         run: echo "${{ secrets.RUMINATE_KEYSTORE_B64 }}" | base64 -d > "$GITHUB_WORKSPACE/ruminate-release.jks"
+      - name: Compute build number
+        run: echo "RUMINATE_VERSION_CODE=$(( 1000 + ${{ github.run_number }} ))" >> "$GITHUB_ENV"
       - name: Build signed release APK
         env:
           RUMINATE_KEYSTORE_PATH: ${{ github.workspace }}/ruminate-release.jks
           RUMINATE_KEYSTORE_PASSWORD: ${{ secrets.RUMINATE_KEYSTORE_PASSWORD }}
           RUMINATE_KEY_ALIAS: ${{ secrets.RUMINATE_KEY_ALIAS }}
           RUMINATE_KEY_PASSWORD: ${{ secrets.RUMINATE_KEY_PASSWORD }}
-          RUMINATE_VERSION_CODE: ${{ 1000 + github.run_number }}
         run: cd android && gradle assembleRelease --no-daemon
       - name: Publish to rolling `apk` release
         env:
