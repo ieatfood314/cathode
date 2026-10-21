@@ -1,4 +1,4 @@
-package com.ruminate.app.ui
+package com.cathode.app.ui
 
 import android.net.Uri
 import android.provider.OpenableColumns
@@ -36,11 +36,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import com.ruminate.app.data.SubInput
-import com.ruminate.app.data.addChannel
-import com.ruminate.app.data.listSubscriptions
-import com.ruminate.app.data.removeChannel
-import com.ruminate.app.data.uploadSubscriptions
+import com.cathode.app.data.SubInput
+import com.cathode.app.data.addChannel
+import com.cathode.app.data.listSubscriptions
+import com.cathode.app.data.removeChannel
+import com.cathode.app.data.uploadSubscriptions
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext

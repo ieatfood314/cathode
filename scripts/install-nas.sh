@@ -9,6 +9,6 @@ mkdir -p data media
 [ -f data/subscriptions.opml ] || cp subscriptions.example.opml data/subscriptions.opml
 
 docker compose up -d --build
-echo "Ruminate server on http://<your-nas>:${RUMINATE_PORT:-8000}"
+echo "Cathode server on http://<your-nas>:${CATHODE_PORT:-8000}"
 echo "Point the Android app at that URL (over Wi-Fi / Tailscale)."
-echo "Trigger a first scan: curl -X POST http://<your-nas>:${RUMINATE_PORT:-8000}/api/subscriptions/refresh"
+echo "Trigger a first scan: curl -X POST http://<your-nas>:${CATHODE_PORT:-8000}/api/subscriptions/refresh"

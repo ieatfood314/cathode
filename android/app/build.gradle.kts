@@ -6,17 +6,17 @@ plugins {
 }
 
 android {
-    namespace = "com.ruminate.app"
+    namespace = "com.cathode.app"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.ruminate.app"
+        applicationId = "com.cathode.app"
         minSdk = 26
         targetSdk = 34
         // CI overrides the code per-build so every main push yields a newer
         // install than the last, without touching this file.
-        versionCode = System.getenv("RUMINATE_VERSION_CODE")?.toIntOrNull() ?: 10
-        versionName = System.getenv("RUMINATE_VERSION_NAME") ?: "0.1.9"
+        versionCode = System.getenv("CATHODE_VERSION_CODE")?.toIntOrNull() ?: 10
+        versionName = System.getenv("CATHODE_VERSION_NAME") ?: "0.2.0"
     }
 
     buildTypes {
@@ -29,17 +29,17 @@ android {
                 "proguard-rules.pro"
             )
             // Signed with the release keystore when env provides it
-            // (RUMINATE_KEYSTORE_PATH/PASSWORD/KEY_ALIAS/KEY_PASSWORD);
+            // (CATHODE_KEYSTORE_PATH/PASSWORD/KEY_ALIAS/KEY_PASSWORD);
             // otherwise plain `gradle assembleRelease` falls back to the
             // debug key (fine for personal use, but keep one machine for
             // Obtainium updates so the signature stays stable).
-            val ksPath = System.getenv("RUMINATE_KEYSTORE_PATH")
+            val ksPath = System.getenv("CATHODE_KEYSTORE_PATH")
             if (ksPath != null) {
-                signingConfig = signingConfigs.create("ruminateRelease") {
+                signingConfig = signingConfigs.create("cathodeRelease") {
                     storeFile = file(ksPath)
-                    storePassword = System.getenv("RUMINATE_KEYSTORE_PASSWORD")
-                    keyAlias = System.getenv("RUMINATE_KEY_ALIAS") ?: "ruminate"
-                    keyPassword = System.getenv("RUMINATE_KEY_PASSWORD")
+                    storePassword = System.getenv("CATHODE_KEYSTORE_PASSWORD")
+                    keyAlias = System.getenv("CATHODE_KEY_ALIAS") ?: "cathode"
+                    keyPassword = System.getenv("CATHODE_KEY_PASSWORD")
                 }
             }
         }

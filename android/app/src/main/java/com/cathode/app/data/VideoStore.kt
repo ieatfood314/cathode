@@ -1,4 +1,4 @@
-package com.ruminate.app.data
+package com.cathode.app.data
 
 import android.content.ContentValues
 import android.content.Context
@@ -28,7 +28,7 @@ fun channelDirName(v: Video): String = sanitizeName(v.channelTitle ?: "Unknown c
 
 fun parseIdFromName(name: String): String? = ID_IN_NAME.find(name)?.groupValues?.get(1)
 
-/** Where saved videos live: the shared Movies/Ruminate folder, or a folder you pick (SD card, USB drive…). */
+/** Where saved videos live: the shared Movies/Cathode folder, or a folder you pick (SD card, USB drive…). */
 sealed interface StoreLocation {
     data object DefaultMovies : StoreLocation
     data class CustomFolder(val treeUri: Uri, val label: String) : StoreLocation
@@ -117,7 +117,7 @@ object VideoStore {
         return n
     }
 
-    // ---- MediaStore (default): Movies/Ruminate/<Channel>/file.mp4 ----
+    // ---- MediaStore (default): Movies/Cathode/<Channel>/file.mp4 ----
 
     private fun listMediaStore(context: Context): List<SavedFile> {
         val out = mutableListOf<SavedFile>()
@@ -134,7 +134,7 @@ object VideoStore {
             while (c.moveToNext()) {
                 val id = parseIdFromName(c.getString(nameCol)) ?: continue
                 val rel = c.getString(pathCol).orEmpty()
-                if (!rel.contains("Movies/Ruminate")) continue
+                if (!rel.contains("Movies/Cathode")) continue
                 out.add(SavedFile(
                     videoId = id,
                     uri = Uri.withAppendedPath(MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
@@ -152,7 +152,7 @@ object VideoStore {
             put(MediaStore.Video.Media.DISPLAY_NAME, videoFileName(v))
             put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/Ruminate/${channelDirName(v)}/")
+                put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/Cathode/${channelDirName(v)}/")
             }
         }
         val uri = context.contentResolver.insert(
@@ -207,6 +207,6 @@ object VideoStore {
     fun scratchPart(context: Context, videoId: String): File {
         val dir = context.externalCacheDir ?: context.cacheDir
         val safe = videoId.replace(Regex("[^A-Za-z0-9_-]"), "_")
-        return File(dir, "ruminate-$safe.bin")
+        return File(dir, "cathode-$safe.bin")
     }
 }

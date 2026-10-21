@@ -10,4 +10,4 @@ if [ ! -f "$APK" ]; then
   exit 1
 fi
 adb install -r "$APK"
-echo "Installed. Open Ruminate, enter http://<your-nas>:8000, stay on Wi-Fi."
+echo "Installed. Open Cathode, enter http://<your-nas>:8000, stay on Wi-Fi."

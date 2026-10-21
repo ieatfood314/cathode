@@ -1,4 +1,4 @@
-package com.ruminate.app.player
+package com.cathode.app.player
 
 import android.app.Notification
 import android.content.Context
@@ -10,7 +10,7 @@ import androidx.media3.exoplayer.offline.DownloadManager
 import androidx.media3.exoplayer.offline.DownloadNotificationHelper
 import androidx.media3.exoplayer.scheduler.Requirements
 import androidx.media3.exoplayer.scheduler.Scheduler
-import com.ruminate.app.R
+import com.cathode.app.R
 import java.io.File
 import java.util.concurrent.Executors
 
@@ -49,7 +49,7 @@ object PlayerHolder {
     }
 
     private fun build(context: Context): DownloadManager {
-        val dir = File(context.filesDir, "ruminate_cache")
+        val dir = File(context.filesDir, "cathode_cache")
         dir.mkdirs()
         val dbProvider = androidx.media3.database.StandaloneDatabaseProvider(context)
         val index = androidx.media3.exoplayer.offline.DefaultDownloadIndex(dbProvider)
@@ -72,11 +72,11 @@ object PlayerHolder {
     }
 }
 
-class RuminateDownloadService :
+class CathodeDownloadService :
     androidx.media3.exoplayer.offline.DownloadService(
         1,
         DEFAULT_FOREGROUND_NOTIFICATION_UPDATE_INTERVAL,
-        "ruminate_downloads",
+        "cathode_downloads",
         R.string.download_notification_channel,
         R.string.download_notification_channel_desc,
     ) {
@@ -89,7 +89,7 @@ class RuminateDownloadService :
     override fun getForegroundNotification(
         downloads: MutableList<androidx.media3.exoplayer.offline.Download>,
         notMetRequirements: Int,
-    ): Notification = DownloadNotificationHelper(this, "ruminate_downloads")
+    ): Notification = DownloadNotificationHelper(this, "cathode_downloads")
         .buildProgressNotification(
             this, R.string.downloading, null, null, downloads, notMetRequirements
         )

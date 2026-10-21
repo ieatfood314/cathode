@@ -459,8 +459,26 @@ def test_settings_survive_restore(monkeypatch, tmp_path):
     s2.db_path = db_path
     dbmod.restore_settings_snapshot(s2)
     assert s2.keep_days == 10 and s2.backfill_days == 5 and s2.delete_after_watched is True
-    # Explicit env in place: saved value must NOT override it.
+    # Env/compose defaults are always "explicit"; the app's saved value wins.
     s3 = Settings(_env_file=None, keep_days=3)
     s3.db_path = db_path
     dbmod.restore_settings_snapshot(s3)
-    assert s3.keep_days == 3
+    assert s3.keep_days == 10
+
+
+def test_legacy_db_adopted(tmp_path):
+    from app import db as dbmod
+    legacy = tmp_path / "ruminate.db"
+    conn = dbmod.connect(str(legacy))
+    conn.execute("INSERT INTO kv(k, v) VALUES('x', 'y')")
+    conn.commit()
+    conn.close()
+    target = tmp_path / "cathode.db"
+    dbmod.adopt_legacy_db(str(target))
+    assert target.exists() and not legacy.exists()
+    conn = dbmod.connect(str(target))
+    assert conn.execute("SELECT v FROM kv WHERE k='x'").fetchone()["v"] == "y"
+    # Never clobbers an existing database.
+    legacy.write_bytes(b"stale")
+    dbmod.adopt_legacy_db(str(target))
+    assert legacy.read_bytes() == b"stale"

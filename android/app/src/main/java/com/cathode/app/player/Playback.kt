@@ -1,4 +1,4 @@
-package com.ruminate.app.player
+package com.cathode.app.player
 
 import android.app.PendingIntent
 import android.content.Context
@@ -13,10 +13,10 @@ import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaSession
-import com.ruminate.app.MainActivity
-import com.ruminate.app.data.PrefsRepo
-import com.ruminate.app.data.isUnmetered
-import com.ruminate.app.data.putProgress
+import com.cathode.app.MainActivity
+import com.cathode.app.data.PrefsRepo
+import com.cathode.app.data.isUnmetered
+import com.cathode.app.data.putProgress
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob

@@ -1,4 +1,4 @@
-package com.ruminate.app.data
+package com.cathode.app.data
 
 import android.content.Context
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -15,7 +15,7 @@ sealed interface SaveState {
 
 /**
  * Offline copies as plain .mp4 files in a folder you choose (shared
- * Movies/Ruminate by default; SD card / USB drive via the folder picker) —
+ * Movies/Cathode by default; SD card / USB drive via the folder picker) —
  * visible in any file manager, never app-private data.
  *
  * Source of truth is a folder scan (video ids live in filenames), so files
@@ -70,7 +70,7 @@ object OfflineRepo {
 
     private fun saveMediaStore(context: Context, v: Video, streamUrl: String, wifiOnly: Boolean) {
         // Partial lives in cache (resume across attempts); the finished file
-        // is published to Movies/Ruminate as one sequential copy.
+        // is published to Movies/Cathode as one sequential copy.
         val dest = VideoStore.scratchPart(context, v.id)
         try {
             downloadResumable(context, streamUrl, dest, wifiOnly, onProgress = progress(v.id))

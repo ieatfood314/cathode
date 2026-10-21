@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <opml version="1.0">
-  <head><title>Ruminate example subscriptions (replace with your export)</title></head>
+  <head><title>Cathode example subscriptions (replace with your export)</title></head>
   <body>
     <!-- Replace this with your real YouTube Takeout / subscription-manager OPML.
          Entry format: <outline text=".." title=".." type="rss"

@@ -33,7 +33,7 @@ jobs:
       - run: cd android && gradle assembleDebug
       - uses: actions/upload-artifact@v4
         with:
-          name: ruminate-debug-apk
+          name: cathode-debug-apk
           path: android/app/build/outputs/apk/debug/*.apk
 
   android-release:
@@ -52,18 +52,18 @@ jobs:
       - uses: gradle/actions/setup-gradle@v3
       - name: Decode keystore
         run: |
-          echo "${{ secrets.RUMINATE_KEYSTORE_B64 }}" | head -c 1 | grep -q . || echo "SKIP_RELEASE=true" >> "$GITHUB_ENV"
-          echo "${{ secrets.RUMINATE_KEYSTORE_B64 }}" | base64 -d > "$GITHUB_WORKSPACE/ruminate-release.jks" || true
+          echo "${{ secrets.CATHODE_KEYSTORE_B64 }}" | head -c 1 | grep -q . || echo "SKIP_RELEASE=true" >> "$GITHUB_ENV"
+          echo "${{ secrets.CATHODE_KEYSTORE_B64 }}" | base64 -d > "$GITHUB_WORKSPACE/cathode-release.jks" || true
       - name: Compute build number
         if: env.SKIP_RELEASE != 'true'
-        run: echo "RUMINATE_VERSION_CODE=$(( 1000 + ${{ github.run_number }} ))" >> "$GITHUB_ENV"
+        run: echo "CATHODE_VERSION_CODE=$(( 1000 + ${{ github.run_number }} ))" >> "$GITHUB_ENV"
       - name: Build signed release APK
         if: env.SKIP_RELEASE != 'true'
         env:
-          RUMINATE_KEYSTORE_PATH: ${{ github.workspace }}/ruminate-release.jks
-          RUMINATE_KEYSTORE_PASSWORD: ${{ secrets.RUMINATE_KEYSTORE_PASSWORD }}
-          RUMINATE_KEY_ALIAS: ${{ secrets.RUMINATE_KEY_ALIAS }}
-          RUMINATE_KEY_PASSWORD: ${{ secrets.RUMINATE_KEY_PASSWORD }}
+          CATHODE_KEYSTORE_PATH: ${{ github.workspace }}/cathode-release.jks
+          CATHODE_KEYSTORE_PASSWORD: ${{ secrets.CATHODE_KEYSTORE_PASSWORD }}
+          CATHODE_KEY_ALIAS: ${{ secrets.CATHODE_KEY_ALIAS }}
+          CATHODE_KEY_PASSWORD: ${{ secrets.CATHODE_KEY_PASSWORD }}
         run: cd android && gradle assembleRelease --no-daemon
       - name: Publish to rolling `apk` release
         if: env.SKIP_RELEASE != 'true'
@@ -72,12 +72,12 @@ jobs:
         run: |
           gh release create apk android/app/build/outputs/apk/release/app-release.apk \
             --target ${{ github.sha }} \
-            --title "Ruminate APK (auto)" \
+            --title "Cathode APK (auto)" \
             --notes "Auto-built from main at ${{ github.sha }}" \
           || true
           gh release upload apk android/app/build/outputs/apk/release/app-release.apk --clobber
           git tag -f apk HEAD
           git push --force origin refs/tags/apk:refs/tags/apk
           gh release edit apk \
-            --title "Ruminate APK (auto)" \
+            --title "Cathode APK (auto)" \
             --notes "Auto-built from main at [${GITHUB_SHA::7}](https://github.com/${{ github.repository }}/commit/${{ github.sha }}). Install with Obtainium (add source ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}) or grab this APK directly."

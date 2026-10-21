@@ -1,4 +1,4 @@
-package com.ruminate.app.ui
+package com.cathode.app.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -33,8 +33,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
-import com.ruminate.app.data.SaveState
-import com.ruminate.app.data.Video
+import com.cathode.app.data.SaveState
+import com.cathode.app.data.Video
 
 @Composable
 fun LibraryScreen(

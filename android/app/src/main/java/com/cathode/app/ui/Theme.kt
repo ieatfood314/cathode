@@ -1,4 +1,4 @@
-package com.ruminate.app.ui
+package com.cathode.app.ui
 
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
@@ -25,6 +25,6 @@ private val Scheme = darkColorScheme(
 )
 
 @Composable
-fun RuminateTheme(content: @Composable () -> Unit) {
+fun CathodeTheme(content: @Composable () -> Unit) {
     MaterialTheme(colorScheme = Scheme, content = content)
 }

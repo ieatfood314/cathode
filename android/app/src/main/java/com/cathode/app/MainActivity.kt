@@ -1,4 +1,4 @@
-package com.ruminate.app
+package com.cathode.app
 
 import android.content.Intent
 import android.net.Uri
@@ -25,32 +25,32 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.media3.common.util.UnstableApi
-import com.ruminate.app.data.AppPrefs
-import com.ruminate.app.data.OfflineRepo
-import com.ruminate.app.data.PrefsRepo
-import com.ruminate.app.data.SaveState
-import com.ruminate.app.data.ServerSettings
-import com.ruminate.app.data.StoreLocation
-import com.ruminate.app.data.Video
-import com.ruminate.app.data.VideoStore
-import com.ruminate.app.data.checkHealth
-import com.ruminate.app.data.fetchFeed
-import com.ruminate.app.data.getServerSettings
-import com.ruminate.app.data.isUnmetered
-import com.ruminate.app.data.putServerSettings
-import com.ruminate.app.data.putProgress
-import com.ruminate.app.data.resolveStore
-import com.ruminate.app.player.Playback
-import com.ruminate.app.player.PlaybackService
-import com.ruminate.app.ui.LibraryScreen
-import com.ruminate.app.ui.PlayerScreen
-import com.ruminate.app.ui.RuminateTheme
-import com.ruminate.app.ui.SettingsScreen
-import com.ruminate.app.ui.SubscriptionsScreen
-import com.ruminate.app.ui.formatBytes
+import com.cathode.app.data.AppPrefs
+import com.cathode.app.data.OfflineRepo
+import com.cathode.app.data.PrefsRepo
+import com.cathode.app.data.SaveState
+import com.cathode.app.data.ServerSettings
+import com.cathode.app.data.StoreLocation
+import com.cathode.app.data.Video
+import com.cathode.app.data.VideoStore
+import com.cathode.app.data.checkHealth
+import com.cathode.app.data.fetchFeed
+import com.cathode.app.data.getServerSettings
+import com.cathode.app.data.isUnmetered
+import com.cathode.app.data.putServerSettings
+import com.cathode.app.data.putProgress
+import com.cathode.app.data.resolveStore
+import com.cathode.app.player.Playback
+import com.cathode.app.player.PlaybackService
+import com.cathode.app.ui.LibraryScreen
+import com.cathode.app.ui.PlayerScreen
+import com.cathode.app.ui.CathodeTheme
+import com.cathode.app.ui.SettingsScreen
+import com.cathode.app.ui.SubscriptionsScreen
+import com.cathode.app.ui.formatBytes
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.ui.unit.dp
-import com.ruminate.app.worker.SyncWorker
+import com.cathode.app.worker.SyncWorker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -65,7 +65,7 @@ class MainActivity : ComponentActivity() {
         val prefsRepo = PrefsRepo(this)
 
         setContent {
-            RuminateTheme {
+            CathodeTheme {
                 val scope = rememberCoroutineScope()
                 val appContext = LocalContext.current.applicationContext
                 val prefs by prefsRepo.flow.collectAsState(initial = AppPrefs())
@@ -83,7 +83,7 @@ class MainActivity : ComponentActivity() {
                 var connStatus by remember { mutableStateOf<String?>(null) }
                 var testing by remember { mutableStateOf(false) }
                 var savedSummary by remember { mutableStateOf<String?>(null) }
-                var storageLabel by remember { mutableStateOf("Movies/Ruminate") }
+                var storageLabel by remember { mutableStateOf("Movies/Cathode") }
                 val saveStates by OfflineRepo.states.collectAsState()
                 val wifiBlocked = prefs.wifiOnly && !isUnmetered(this)
                 val canUseNetwork = prefs.serverUrl.isNotBlank() &&
@@ -98,7 +98,7 @@ class MainActivity : ComponentActivity() {
                     savedSummary = if (n == 0) "Nothing saved on this phone yet."
                     else "$n videos · ${formatBytes(b)} saved as files."
                     storageLabel = when (val s = store) {
-                        is StoreLocation.DefaultMovies -> "Movies/Ruminate"
+                        is StoreLocation.DefaultMovies -> "Movies/Cathode"
                         is StoreLocation.CustomFolder -> s.label
                     }
                 }
@@ -221,7 +221,7 @@ class MainActivity : ComponentActivity() {
                     // wipe the saved server URL (the 0.1.3 restart bug).
                     val current = prefsRepo.flow.first()
                     if (!current.legacyCacheWiped) {
-                        File(filesDir, "ruminate_cache").deleteRecursively()
+                        File(filesDir, "cathode_cache").deleteRecursively()
                         prefsRepo.update(current.copy(legacyCacheWiped = true))
                     }
                     SyncWorker.runOnOpen(this@MainActivity)

@@ -3,9 +3,9 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "ruminate-server"
+name = "cathode-server"
 version = "0.1.0"
-description = "Ruminate NAS downloader: yt-dlp + SponsorBlock auto-archiver for YouTube subscriptions"
+description = "Cathode NAS downloader: yt-dlp + SponsorBlock auto-archiver for YouTube subscriptions"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

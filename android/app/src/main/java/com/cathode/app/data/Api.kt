@@ -1,4 +1,4 @@
-package com.ruminate.app.data
+package com.cathode.app.data
 
 import android.content.Context
 import android.net.ConnectivityManager

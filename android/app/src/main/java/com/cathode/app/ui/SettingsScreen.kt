@@ -1,4 +1,4 @@
-package com.ruminate.app.ui
+package com.cathode.app.ui
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -28,9 +28,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import com.ruminate.app.data.AppPrefs
-import com.ruminate.app.data.ServerSettings
-import com.ruminate.app.data.VideoStore
+import com.cathode.app.data.AppPrefs
+import com.cathode.app.data.ServerSettings
+import com.cathode.app.data.VideoStore
 
 /** Retention steps: every day up to a month, then 60 / 90 / 180 / 360. */
 val RETENTION_OPTIONS: List<Int> = listOf(0) + (1..30).toList() + listOf(60, 90, 180, 360)

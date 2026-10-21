@@ -39,6 +39,19 @@ CREATE INDEX IF NOT EXISTS idx_videos_published ON videos(published DESC);
 """
 
 
+def adopt_legacy_db(db_path: str) -> None:
+    """Pick up a database left by the project's old name (ruminate.db) when
+    the configured path doesn't exist yet."""
+    target = Path(db_path)
+    legacy = target.with_name("ruminate.db")
+    if target.exists() or target == legacy or not legacy.exists():
+        return
+    for suffix in ("", "-wal", "-shm", "-journal"):
+        src = Path(str(legacy) + suffix)
+        if src.exists():
+            src.rename(str(target) + suffix)
+
+
 def connect(db_path: str) -> sqlite3.Connection:
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path)
@@ -140,9 +153,10 @@ def restore_settings_snapshot(settings_obj) -> None:
         saved = json.loads(row["v"])
     except Exception:
         return
-    # Fields explicitly provided (constructor args or RUMINATE_* env) are the
-    # operator's truth and must not be overwritten by the saved snapshot.
-    provided = getattr(settings_obj, "model_fields_set", set())
+    # The snapshot is what was last saved from the app, so it wins over env:
+    # docker-compose passes every CATHODE_* setting with a default, and
+    # treating those as explicit would reset the app's choices on every
+    # restart. Env only seeds a fresh install.
     for k in PERSISTED_SETTINGS:
-        if k in saved and k not in provided:
+        if k in saved:
             setattr(settings_obj, k, saved[k])

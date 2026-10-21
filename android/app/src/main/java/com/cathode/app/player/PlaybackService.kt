@@ -1,4 +1,4 @@
-package com.ruminate.app.player
+package com.cathode.app.player
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -11,7 +11,7 @@ import androidx.core.app.ServiceCompat
 import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
-import com.ruminate.app.R
+import com.cathode.app.R
 
 /**
  * Hosts the Playback singleton's session so Android's media player (quick

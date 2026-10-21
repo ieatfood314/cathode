@@ -1,4 +1,4 @@
-"""Ruminate server: library API + resumable file serving + poll triggers."""
+"""Cathode server: library API + resumable file serving + poll triggers."""
 
 import mimetypes
 import os
@@ -22,9 +22,10 @@ CHUNK = 1024 * 1024
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Restart-proof user settings: restore whatever was PUT last, unless the
-    # same field was explicitly configured via env (env wins over saved state).
+    # Restart-proof user settings: restore whatever was PUT last (saved state
+    # wins over env defaults).
     try:
+        dbmod.adopt_legacy_db(settings.db_path)
         dbmod.restore_settings_snapshot(settings)
     except Exception:
         pass
@@ -33,7 +34,7 @@ async def lifespan(app: FastAPI):
     poller.stop()
 
 
-app = FastAPI(title="Ruminate", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="Cathode", version="0.1.0", lifespan=lifespan)
 
 
 def _conn() -> sqlite3.Connection:

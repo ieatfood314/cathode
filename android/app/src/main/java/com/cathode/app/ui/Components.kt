@@ -1,4 +1,4 @@
-package com.ruminate.app.ui
+package com.cathode.app.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box

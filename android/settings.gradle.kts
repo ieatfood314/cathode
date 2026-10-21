@@ -12,5 +12,5 @@ dependencyResolutionManagement {
         mavenCentral()
     }
 }
-rootProject.name = "Ruminate"
+rootProject.name = "Cathode"
 include(":app")

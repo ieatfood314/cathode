@@ -1,4 +1,4 @@
-package com.ruminate.app.ui
+package com.cathode.app.ui
 
 import android.app.Activity
 import android.content.pm.ActivityInfo
@@ -40,9 +40,9 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.PlayerView
-import com.ruminate.app.data.SaveState
-import com.ruminate.app.data.Video
-import com.ruminate.app.player.Playback
+import com.cathode.app.data.SaveState
+import com.cathode.app.data.Video
+import com.cathode.app.player.Playback
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 

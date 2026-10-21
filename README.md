@@ -1,4 +1,4 @@
-# Ruminate
+# Cathode
 
 Your subscriptions, auto-downloaded to your NAS, watchable offline on your phone. No Premium, no cellular data, no progress lost on bad Wi-Fi.
 
@@ -6,7 +6,7 @@ Your subscriptions, auto-downloaded to your NAS, watchable offline on your phone
 - **Android app** (`android/`, OLED black + glass): library of downloaded videos, in-app playback, auto-sync the moment you open it.
 - **Generic by design**: point `data/subscriptions.opml` or `data/channels.txt` at your channels and it works. No personal data in this repo.
 
-Inspired by [Pinchflat](https://github.com/kieraneglin/pinchflat) (auto-archive + SponsorBlock model) and [TubeArchivist](https://github.com/tubearchivist/tubearchivist) (self-hosted library model). Ruminate is the lightweight alternative: single small server + a purpose-built offline-first phone app instead of Plex/Jellyfin + a heavy index.
+Inspired by [Pinchflat](https://github.com/kieraneglin/pinchflat) (auto-archive + SponsorBlock model) and [TubeArchivist](https://github.com/tubearchivist/tubearchivist) (self-hosted library model). Cathode is the lightweight alternative: single small server + a purpose-built offline-first phone app instead of Plex/Jellyfin + a heavy index.
 
 ## How it works
 
@@ -19,7 +19,7 @@ YouTube ──poll──▶ server (yt-dlp + SponsorBlock) ──Wi-Fi only─�
 
 1. Server discovers uploads per channel (`yt-dlp --flat-playlist`, RSS-aware) on a schedule **or** when the app asks.
 2. Server downloads with resume-safe flags (`--continuedl`, fragment retries, backoff) + SponsorBlock (removes `sponsor,selfpromo,interaction`, marks the rest as chapters so archive jobs stay fast).
-3. App syncs **only on unmetered Wi-Fi** (WorkManager `UNMETERED` + runtime check), streams files with HTTP `Range`, and keeps **offline copies as plain .mp4 files** — shared `Movies/Ruminate` by default, or any folder you pick (SD card, USB drive). A dropped connection resumes where it stopped — never from zero.
+3. App syncs **only on unmetered Wi-Fi** (WorkManager `UNMETERED` + runtime check), streams files with HTTP `Range`, and keeps **offline copies as plain .mp4 files** — shared `Movies/Cathode` by default, or any folder you pick (SD card, USB drive). A dropped connection resumes where it stopped — never from zero.
 
 ## Quick start (NAS)
 
@@ -48,7 +48,7 @@ offline sync there).
 
 OLED black (`#000000`) + frosted glass cards, bottom-nav Library / Now playing / Settings.
 
-**Install via [Obtainium](https://apps.obtainium.imranr.dev/)** (update tracking, no store needed): add app → source GitHub → `https://github.com/ieatfood314/ruminate` — it picks up each release APK automatically. Or download the APK from the [releases page](../../releases) and install directly.
+**Install via [Obtainium](https://apps.obtainium.imranr.dev/)** (update tracking, no store needed): add app → source GitHub → `https://github.com/ieatfood314/cathode` — it picks up each release APK automatically. Or download the APK from the [releases page](../../releases) and install directly.
 
 ```bash
 cd android && ./gradlew assembleRelease
@@ -103,3 +103,7 @@ Poll interval slider + server push button live in Settings; server also exposes 
 - Server binds LAN only by default; expose via Tailscale/WireGuard, not the public internet.
 - YouTube breakage: downloads depend on yt-dlp; update with `docker compose build --pull` when YouTube changes.
 - Only archive content you're entitled to keep.
+
+## Upgrading from Ruminate
+
+Cathode was called Ruminate. Existing servers keep working: `RUMINATE_*` env vars are still read (a `CATHODE_*` one wins if both are set), and a `ruminate.db` next to the configured database path is picked up automatically. The Android app has a new package id (`com.cathode.app`), so it installs alongside the old app; re-add it in Obtainium and uninstall Ruminate.

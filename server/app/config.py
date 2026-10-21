@@ -1,6 +1,6 @@
 """Central configuration. Everything is env-overridable so no personal info is hardcoded.
 
-Generic self-host: point RUMINATE_DATA_DIR at a folder containing
+Generic self-host: point CATHODE_DATA_DIR at a folder containing
 subscriptions.opml (YouTube Takeout export, free) and/or channels.txt.
 """
 
@@ -10,11 +10,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="RUMINATE_")
+    model_config = SettingsConfigDict(env_prefix="CATHODE_")
 
     data_dir: str = "/data"
     media_dir: str = "/media"
-    db_path: str = "/data/ruminate.db"
+    db_path: str = "/data/cathode.db"
     archive_path: str = "/data/archive.txt"
 
     # Polling: how the server discovers new uploads.
@@ -48,11 +48,18 @@ class Settings(BaseSettings):
     port: int = 8000
 
 
+# Backwards-compat: the project was called Ruminate, so existing .env files
+# and compose setups still say RUMINATE_*. Those apply unless the CATHODE_*
+# equivalent is set.
+for _k, _v in list(os.environ.items()):
+    if _k.startswith("RUMINATE_"):
+        os.environ.setdefault("CATHODE_" + _k[len("RUMINATE_"):], _v)
+
 settings = Settings()
 
 # Backwards-compat for the short names used in early docs/scripts:
-# RUMINATE_DATA -> RUMINATE_DATA_DIR, RUMINATE_MEDIA -> RUMINATE_MEDIA_DIR.
-if os.getenv("RUMINATE_DATA") and not os.getenv("RUMINATE_DATA_DIR"):
-    settings.data_dir = os.environ["RUMINATE_DATA"]
-if os.getenv("RUMINATE_MEDIA") and not os.getenv("RUMINATE_MEDIA_DIR"):
-    settings.media_dir = os.environ["RUMINATE_MEDIA"]
+# CATHODE_DATA -> CATHODE_DATA_DIR, CATHODE_MEDIA -> CATHODE_MEDIA_DIR.
+if os.getenv("CATHODE_DATA") and not os.getenv("CATHODE_DATA_DIR"):
+    settings.data_dir = os.environ["CATHODE_DATA"]
+if os.getenv("CATHODE_MEDIA") and not os.getenv("CATHODE_MEDIA_DIR"):
+    settings.media_dir = os.environ["CATHODE_MEDIA"]

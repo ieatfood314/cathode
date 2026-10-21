@@ -39,7 +39,7 @@ class Poller:
         if self._thread and self._thread.is_alive():
             return
         self._stop.clear()
-        self._thread = threading.Thread(target=self._loop, daemon=True, name="ruminate-poller")
+        self._thread = threading.Thread(target=self._loop, daemon=True, name="cathode-poller")
         self._thread.start()
 
     def stop(self):
@@ -92,7 +92,7 @@ class Poller:
                     downloaded += r[1]
                     failed += r[2]
                 except Exception as e:
-                    print(f"ruminate: scan failed for {sub.source_url}: {e!r}", flush=True)
+                    print(f"cathode: scan failed for {sub.source_url}: {e!r}", flush=True)
                     continue
             conn.close()
             self.last_run = int(time.time())
@@ -122,7 +122,7 @@ class Poller:
                 return {"started": False, "reason": "already running",
                         "last_result": self.last_result}
             t = threading.Thread(target=self._guarded_scan, daemon=True,
-                                 name="ruminate-scan-once")
+                                 name="cathode-scan-once")
             t.start()
             return {"started": True, "last_result": self.last_result}
 
@@ -131,7 +131,7 @@ class Poller:
             self.scan_once()
         except Exception as e:
             import traceback
-            print("ruminate: poller task crashed:", traceback.format_exc(), flush=True)
+            print("cathode: poller task crashed:", traceback.format_exc(), flush=True)
 
     def _scan_subscription(self, conn: sqlite3.Connection, sub: Subscription,
                            media_dir: Path, archive: Path) -> tuple[int, int, int]:

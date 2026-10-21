@@ -11,7 +11,7 @@ PAGE = """<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Ruminate</title>
+<title>Cathode</title>
 <style>
 :root { color-scheme: dark; }
 body { background: #000; color: #eee; font-family: system-ui, sans-serif; margin: 0; padding: 16px; }
@@ -35,7 +35,7 @@ button:hover { border-color: #8b7cff; }
 </style>
 </head>
 <body>
-<h1>Ruminate</h1>
+<h1>Cathode</h1>
 <div id="player">
   <video id="vid" controls preload="none"></video>
   <div class="bar" style="margin-top:8px">

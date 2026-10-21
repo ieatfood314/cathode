@@ -1,4 +1,4 @@
-package com.ruminate.app.data
+package com.cathode.app.data
 
 import android.content.Context
 import androidx.datastore.preferences.core.booleanPreferencesKey
@@ -10,7 +10,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
-private val Context.prefs by preferencesDataStore("ruminate")
+private val Context.prefs by preferencesDataStore("cathode")
 
 object PrefsKeys {
     val SERVER_URL = stringPreferencesKey("server_url") // e.g. http://server.local:8000, no default committed
@@ -22,7 +22,7 @@ object PrefsKeys {
     val AUTO_SAVE_NEW = booleanPreferencesKey("auto_save_new") // save new arrivals when the app opens
     val AUTO_SAVE_BASELINE = longPreferencesKey("auto_save_baseline") // max published seen; 0 = not set yet
     val DELETE_AFTER_WATCHED = booleanPreferencesKey("delete_after_watched") // free the phone copy on watched
-    val STORAGE_URI = stringPreferencesKey("storage_uri") // SAF tree URI; blank = shared Movies/Ruminate
+    val STORAGE_URI = stringPreferencesKey("storage_uri") // SAF tree URI; blank = shared Movies/Cathode
     val LEGACY_CACHE_WIPED = booleanPreferencesKey("legacy_cache_wiped")
 }
 

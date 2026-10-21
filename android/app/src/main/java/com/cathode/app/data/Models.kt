@@ -1,4 +1,4 @@
-package com.ruminate.app.data
+package com.cathode.app.data
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable

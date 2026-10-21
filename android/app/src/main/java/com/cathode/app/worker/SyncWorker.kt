@@ -1,4 +1,4 @@
-package com.ruminate.app.worker
+package com.cathode.app.worker
 
 import android.content.Context
 import androidx.work.Constraints
@@ -9,10 +9,10 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
-import com.ruminate.app.data.PrefsRepo
-import com.ruminate.app.data.fetchFeed
-import com.ruminate.app.data.isUnmetered
-import com.ruminate.app.data.triggerServerPoll
+import com.cathode.app.data.PrefsRepo
+import com.cathode.app.data.fetchFeed
+import com.cathode.app.data.isUnmetered
+import com.cathode.app.data.triggerServerPoll
 import kotlinx.coroutines.flow.first
 
 /**
@@ -44,8 +44,8 @@ class SyncWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, 
     }
 
     companion object {
-        const val ON_OPEN = "ruminate-sync-onopen"
-        const val PERIODIC = "ruminate-sync-periodic"
+        const val ON_OPEN = "cathode-sync-onopen"
+        const val PERIODIC = "cathode-sync-periodic"
 
         private fun wifiConstraints() = Constraints.Builder()
             .setRequiredNetworkType(NetworkType.UNMETERED) // Wi-Fi only, OS-enforced

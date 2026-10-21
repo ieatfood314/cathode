@@ -167,7 +167,7 @@ def fetch_rss_recent(channel_id: str) -> dict[str, str]:
     import xml.etree.ElementTree as ET
     url = f"https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "ruminate/0.1"})
+        req = urllib.request.Request(url, headers={"User-Agent": "cathode/0.1"})
         with urllib.request.urlopen(req, timeout=20) as r:
             root = ET.fromstring(r.read())
     except Exception:

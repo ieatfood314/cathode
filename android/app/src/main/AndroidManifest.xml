@@ -14,14 +14,14 @@
     <!-- Cleartext allowed: the server lives on your LAN / tailnet (plain http
          there); remote access uses Tailscale's own HTTPS. -->
     <application
-        android:name=".RuminateApp"
+        android:name=".CathodeApp"
         android:allowBackup="true"
         android:icon="@drawable/ic_launcher"
-        android:label="Ruminate"
-        android:theme="@style/Theme.Ruminate"
+        android:label="Cathode"
+        android:theme="@style/Theme.Cathode"
         android:usesCleartextTraffic="true">
 
-        <!-- WorkManager is initialized on-demand via RuminateApp (Configuration.Provider). -->
+        <!-- WorkManager is initialized on-demand via CathodeApp (Configuration.Provider). -->
         <provider
             android:name="androidx.startup.InitializationProvider"
             android:authorities="${applicationId}.androidx-startup"
@@ -34,7 +34,7 @@
             android:name=".MainActivity"
             android:exported="true"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode"
-            android:theme="@style/Theme.Ruminate">
+            android:theme="@style/Theme.Cathode">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -52,7 +52,7 @@
         </service>
 
         <service
-            android:name=".player.RuminateDownloadService"
+            android:name=".player.CathodeDownloadService"
             android:exported="false"
             android:foregroundServiceType="dataSync">
             <intent-filter>

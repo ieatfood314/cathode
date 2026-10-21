@@ -15,6 +15,6 @@ COPY app ./app
 
 VOLUME ["/data", "/media"]
 EXPOSE 8000
-ENV RUMINATE_DATA=/data RUMINATE_MEDIA=/media RUMINATE_DB_PATH=/data/ruminate.db \
-    RUMINATE_ARCHIVE_PATH=/data/archive.txt
+ENV CATHODE_DATA=/data CATHODE_MEDIA=/media CATHODE_DB_PATH=/data/cathode.db \
+    CATHODE_ARCHIVE_PATH=/data/archive.txt
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
