@@ -146,10 +146,17 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
+                // Mirror progress into the list right away so its progress
+                // bars and "Continue watching" order don't wait for a refresh.
+                fun patchPosition(id: String, pos: Int) {
+                    videos = videos.map { if (it.id == id) it.copy(positionSeconds = pos) else it }
+                }
+
                 // Shared by the player's periodic saver, leaving the player
                 // screen, closing a video, and video switches: PUT tail
                 // progress; server also auto-watches past ~95%.
                 fun submitProgress(v: Video, pos: Int): Boolean {
+                    patchPosition(v.id, pos)
                     if (!canUseNetwork) return false
                     scope.launch(Dispatchers.IO) {
                         runCatching {
@@ -238,6 +245,13 @@ class MainActivity : ComponentActivity() {
                 // Load full server config whenever the Settings tab opens.
                 LaunchedEffect(tab) {
                     if (tab == 3) loadServer()
+                    // Back to the library while a video plays (the background
+                    // saver doesn't touch the list): show where it's at now.
+                    val v = open
+                    val p = Playback.current
+                    if (tab == 0 && v != null && p != null && Playback.videoId == v.id) {
+                        patchPosition(v.id, (p.currentPosition.coerceAtLeast(0) / 1000L).toInt())
+                    }
                 }
                 // Auto-save server settings (debounced): every change restarts
                 // the wait, so dragging a slider sends one PUT at the end.
@@ -308,6 +322,9 @@ class MainActivity : ComponentActivity() {
                                 },
                                 onWatched = {
                                     val v = open!!
+                                    videos = videos.map {
+                                        if (it.id == v.id) it.copy(watched = 1) else it
+                                    }
                                     scope.launch(Dispatchers.IO) {
                                         runCatching {
                                             okhttp3.OkHttpClient().newCall(
