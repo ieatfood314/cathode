@@ -294,6 +294,7 @@ class MainActivity : ComponentActivity() {
                             open != null && tab == 2 -> PlayerScreen(
                                 video = open!!,
                                 streamUrl = streamUrl(open!!),
+                                artworkUrl = "${prefs.serverUrl}/api/thumbs/${open!!.id}",
                                 savedUri = openUri,
                                 saveState = saveStates[open!!.id]
                                     ?: OfflineRepo.stateOf(open!!.id),

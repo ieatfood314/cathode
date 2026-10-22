@@ -1,3 +1,5 @@
+<img src="docs/logo.png" alt="" width="96" align="right">
+
 # Cathode
 
 Your subscriptions, auto-downloaded to your NAS, watchable offline on your phone. No Premium, no cellular data, no progress lost on bad Wi-Fi.

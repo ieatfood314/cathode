@@ -3,6 +3,8 @@ package com.cathode.app.ui
 import android.app.Activity
 import android.content.pm.ActivityInfo
 import android.net.Uri
+import android.os.Build
+import android.view.WindowManager
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -39,6 +41,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import com.cathode.app.data.SaveState
 import com.cathode.app.data.Video
@@ -53,6 +56,7 @@ private const val RESUME_WINDOW = 0.95
 fun PlayerScreen(
     video: Video,
     streamUrl: String,
+    artworkUrl: String?,
     savedUri: Uri?,
     saveState: SaveState,
     showSave: Boolean,
@@ -81,7 +85,10 @@ fun PlayerScreen(
             video.positionSeconds >= video.duration * RESUME_WINDOW
         val resumeMs = if (video.watched == 1 || nearEnd) 0L
         else video.positionSeconds.coerceAtLeast(0) * 1000L
-        Playback.ensure(context, video.id, streamUrl, savedUri, resumeMs)
+        Playback.ensure(
+            context, video.id, streamUrl, savedUri, resumeMs,
+            title = video.title, channel = video.channelTitle, artworkUrl = artworkUrl,
+        )
     }
 
     // Save progress on leaving (tab switch, app close): the player outlives
@@ -114,6 +121,20 @@ fun PlayerScreen(
             }
         }
     }
+    // Keep the display awake while a video is actually playing (Android's
+    // dim/sleep timeout otherwise blanks it mid-video); paused or ended lets
+    // the screen time out normally again.
+    var playing by remember(player) { mutableStateOf(player.isPlaying) }
+    DisposableEffect(player) {
+        val listener = object : Player.Listener {
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                playing = isPlaying
+            }
+        }
+        player.addListener(listener)
+        onDispose { runCatching { player.removeListener(listener) } }
+    }
+
     // Auto-mark watched when the video finishes — no button to press.
     DisposableEffect(player, video.id) {
         val listener = object : Player.Listener {
@@ -136,6 +157,9 @@ fun PlayerScreen(
             activity?.requestedOrientation =
                 ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
             WindowCompat.setDecorFitsSystemWindows(window, false)
+            // Draw under the camera cutout too; otherwise Android keeps that
+            // edge black in landscape.
+            setCutoutMode(window, fill = true)
             WindowInsetsControllerCompat(window, window.decorView).apply {
                 hide(WindowInsetsCompat.Type.systemBars())
                 systemBarsBehavior = WindowInsetsControllerCompat
@@ -148,6 +172,7 @@ fun PlayerScreen(
                     activity?.requestedOrientation =
                         ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
                     WindowCompat.setDecorFitsSystemWindows(window, true)
+                    setCutoutMode(window, fill = false)
                     WindowInsetsControllerCompat(window, window.decorView)
                         .show(WindowInsetsCompat.Type.systemBars())
                 }
@@ -171,7 +196,14 @@ fun PlayerScreen(
             // Rebind whenever `player` changes (source swap, re-entry):
             // factory runs once, so without this the view would hold the old,
             // released player — black screen while audio played on.
-            update = { view -> if (view.player !== player) view.player = player },
+            // Fullscreen zooms to fill the display (crops the few % a 16:9
+            // video doesn't cover on a tall phone) instead of black bars.
+            update = { view ->
+                if (view.player !== player) view.player = player
+                view.keepScreenOn = playing
+                view.resizeMode = if (fullscreen) AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                else AspectRatioFrameLayout.RESIZE_MODE_FIT
+            },
             modifier = if (fullscreen) {
                 Modifier.fillMaxSize()
             } else {
@@ -236,6 +268,18 @@ fun PlayerScreen(
                 }
                 Spacer(Modifier.height(12.dp))
             }
+        }
+    }
+}
+
+private fun setCutoutMode(window: android.view.Window, fill: Boolean) {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return
+    window.attributes = window.attributes.apply {
+        layoutInDisplayCutoutMode = when {
+            !fill -> WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.R ->
+                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+            else -> WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
         }
     }
 }

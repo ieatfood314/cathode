@@ -4,7 +4,9 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
@@ -45,6 +47,13 @@ object Playback {
     var session: MediaSession? = null
         private set
     private var fileSource = false
+    /** Running PlaybackService, so each new session lands in Android's media
+     *  player right away instead of waiting for a controller to ask for it. */
+    var service: PlaybackService? = null
+        set(value) {
+            field = value
+            session?.let { value?.addSession(it) }
+        }
     private var player: ExoPlayer? = null
     private var prefsRepo: PrefsRepo? = null
     private var saverJob: kotlinx.coroutines.Job? = null
@@ -56,14 +65,16 @@ object Playback {
         streamUrl: String,
         savedUri: Uri?,
         resumeMs: Long,
+        title: String?,
+        channel: String?,
+        artworkUrl: String?,
     ): ExoPlayer {
         val sameVideo = videoId == id && (savedUri != null) == fileSource
         val existing = player
         if (existing != null && sameVideo) return existing
         // Session wrappers listen to their player: always retire the session
         // before the player it references.
-        session?.release()
-        session = null
+        retireSession()
         existing?.release()
         prefsRepo ?: PrefsRepo(context.applicationContext).also { prefsRepo = it }
         val fresh =
@@ -84,9 +95,24 @@ object Playback {
                 )
                 ExoPlayer.Builder(context).setMediaSourceFactory(sourceFactory).build()
             }
+        // Screen-off / backgrounded playback keeps the CPU (and Wi-Fi when
+        // streaming) awake instead of stalling mid-video.
+        fresh.setWakeMode(if (savedUri != null) C.WAKE_MODE_LOCAL else C.WAKE_MODE_NETWORK)
         fileSource = savedUri != null
         videoId = id
-        fresh.setMediaItem(MediaItem.fromUri(savedUri ?: Uri.parse(streamUrl)))
+        // Title/channel/thumbnail are what Android's media player shows.
+        val metadata = MediaMetadata.Builder()
+            .setTitle(title)
+            .setArtist(channel)
+            .setArtworkUri(artworkUrl?.let(Uri::parse))
+            .build()
+        fresh.setMediaItem(
+            MediaItem.Builder()
+                .setMediaId(id)
+                .setUri(savedUri ?: Uri.parse(streamUrl))
+                .setMediaMetadata(metadata)
+                .build()
+        )
         if (resumeMs > 0) fresh.seekTo(resumeMs)
         fresh.prepare()
         fresh.playWhenReady = true
@@ -116,6 +142,7 @@ object Playback {
         session = MediaSession.Builder(app, fresh)
             .setSessionActivity(launch)
             .build()
+            .also { service?.addSession(it) }
         saverJob?.cancel()
         saverJob = bg.launch {
             while (isActive) {
@@ -138,11 +165,18 @@ object Playback {
         runCatching { putProgress(p.serverUrl, id, pos) }
     }
 
+    private fun retireSession() {
+        session?.let { s ->
+            service?.removeSession(s)
+            s.release()
+        }
+        session = null
+    }
+
     fun close() {
         saverJob?.cancel()
         saverJob = null
-        session?.release()
-        session = null
+        retireSession()
         player?.release()
         player = null
         videoId = null

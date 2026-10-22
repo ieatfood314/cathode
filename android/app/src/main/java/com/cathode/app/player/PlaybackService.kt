@@ -25,7 +25,14 @@ class PlaybackService : MediaSessionService() {
     override fun onCreate() {
         super.onCreate()
         startForegroundImmediately()
+        Playback.service = this
         watchdogNoSession()
+    }
+
+    override fun onDestroy() {
+        if (Playback.service === this) Playback.service = null
+        handler.removeCallbacksAndMessages(null)
+        super.onDestroy()
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? =
@@ -49,7 +56,7 @@ class PlaybackService : MediaSessionService() {
         val placeholder = NotificationCompat.Builder(
             this, DefaultMediaNotificationProvider.DEFAULT_CHANNEL_ID
         )
-            .setSmallIcon(R.drawable.ic_launcher)
+            .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(getString(R.string.app_name))
             .setSilent(true)
             .setOngoing(true)
