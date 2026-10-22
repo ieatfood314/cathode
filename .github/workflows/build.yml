@@ -37,8 +37,9 @@ jobs:
           path: android/app/build/outputs/apk/debug/*.apk
 
   android-release:
-    # Every push to main feeds a rolling release tagged `apk` (Obtainium
-    # tracks it). Skipped silently if the signing secret isn't configured
+    # Every push to main publishes a versioned release (v<name>.<code>) whose
+    # tag matches the APK's versionName, so Obtainium can tell when it's out
+    # of date. Skipped silently if the signing secret isn't configured
     # (e.g. forks) — tests and the debug APK still run.
     if: github.event_name != 'pull_request'
     needs: server-tests
@@ -56,7 +57,11 @@ jobs:
           echo "${{ secrets.CATHODE_KEYSTORE_B64 }}" | base64 -d > "$GITHUB_WORKSPACE/cathode-release.jks" || true
       - name: Compute build number
         if: env.SKIP_RELEASE != 'true'
-        run: echo "CATHODE_VERSION_CODE=$(( 1000 + ${{ github.run_number }} ))" >> "$GITHUB_ENV"
+        run: |
+          code=$(( 1000 + ${{ github.run_number }} ))
+          base=$(sed -n 's/.*CATHODE_VERSION_NAME") ?: "\([0-9.]*\)".*/\1/p' android/app/build.gradle.kts)
+          echo "CATHODE_VERSION_CODE=$code" >> "$GITHUB_ENV"
+          echo "CATHODE_VERSION_NAME=$base.$code" >> "$GITHUB_ENV"
       - name: Build signed release APK
         if: env.SKIP_RELEASE != 'true'
         env:
@@ -65,19 +70,20 @@ jobs:
           CATHODE_KEY_ALIAS: ${{ secrets.CATHODE_KEY_ALIAS }}
           CATHODE_KEY_PASSWORD: ${{ secrets.CATHODE_KEY_PASSWORD }}
         run: cd android && gradle assembleRelease --no-daemon
-      - name: Publish to rolling `apk` release
+      - name: Publish release
         if: env.SKIP_RELEASE != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create apk android/app/build/outputs/apk/release/app-release.apk \
+          tag="v$CATHODE_VERSION_NAME"
+          apk="cathode-$CATHODE_VERSION_NAME.apk"
+          cp android/app/build/outputs/apk/release/app-release.apk "$apk"
+          gh release create "$tag" "$apk" \
             --target ${{ github.sha }} \
-            --title "Cathode APK (auto)" \
-            --notes "Auto-built from main at ${{ github.sha }}" \
-          || true
-          gh release upload apk android/app/build/outputs/apk/release/app-release.apk --clobber
-          git tag -f apk HEAD
-          git push --force origin refs/tags/apk:refs/tags/apk
-          gh release edit apk \
-            --title "Cathode APK (auto)" \
-            --notes "Auto-built from main at [${GITHUB_SHA::7}](https://github.com/${{ github.repository }}/commit/${{ github.sha }}). Install with Obtainium (add source ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}) or grab this APK directly."
+            --title "Cathode $CATHODE_VERSION_NAME" \
+            --notes "Auto-built from main at [${GITHUB_SHA::7}](https://github.com/${{ github.repository }}/commit/${{ github.sha }}). Install with Obtainium (add source ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}) or grab this APK directly." \
+            --latest
+          # Keep the five newest builds; older ones only clutter the page.
+          gh release list --limit 100 --json tagName,createdAt \
+            --jq 'sort_by(.createdAt) | reverse | .[5:] | .[].tagName' \
+          | while read -r old; do gh release delete "$old" --yes --cleanup-tag; done
