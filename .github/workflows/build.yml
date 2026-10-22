@@ -83,7 +83,9 @@ jobs:
             --title "Cathode $CATHODE_VERSION_NAME" \
             --notes "Auto-built from main at [${GITHUB_SHA::7}](https://github.com/${{ github.repository }}/commit/${{ github.sha }}). Install with Obtainium (add source ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}) or grab this APK directly." \
             --latest
-          # Keep the five newest builds; older ones only clutter the page.
+          # Keep the five newest auto builds (v<a>.<b>.<c>.<code>); hand-made
+          # releases are never touched.
           gh release list --limit 100 --json tagName,createdAt \
-            --jq 'sort_by(.createdAt) | reverse | .[5:] | .[].tagName' \
+            --jq '[.[] | select(.tagName | test("^v[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$"))]
+                  | sort_by(.createdAt) | reverse | .[5:] | .[].tagName' \
           | while read -r old; do gh release delete "$old" --yes --cleanup-tag; done
