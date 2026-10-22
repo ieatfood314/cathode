@@ -41,7 +41,6 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import com.cathode.app.data.SaveState
 import com.cathode.app.data.Video
@@ -180,6 +179,7 @@ fun PlayerScreen(
         }
     }
 
+    var controlsVisible by remember { mutableStateOf(true) }
     Box(
         Modifier
             .fillMaxSize()
@@ -191,18 +191,21 @@ fun PlayerScreen(
                     this.player = player
                     useController = true
                     setFullscreenButtonClickListener { want -> onFullscreenChange(want) }
+                    // The close button rides along with the player's own
+                    // controls: hidden until you tap the video.
+                    setControllerVisibilityListener(
+                        PlayerView.ControllerVisibilityListener { visibility ->
+                            controlsVisible = visibility == android.view.View.VISIBLE
+                        }
+                    )
                 }
             },
             // Rebind whenever `player` changes (source swap, re-entry):
             // factory runs once, so without this the view would hold the old,
             // released player — black screen while audio played on.
-            // Fullscreen zooms to fill the display (crops the few % a 16:9
-            // video doesn't cover on a tall phone) instead of black bars.
             update = { view ->
                 if (view.player !== player) view.player = player
                 view.keepScreenOn = playing
-                view.resizeMode = if (fullscreen) AspectRatioFrameLayout.RESIZE_MODE_ZOOM
-                else AspectRatioFrameLayout.RESIZE_MODE_FIT
             },
             modifier = if (fullscreen) {
                 Modifier.fillMaxSize()
@@ -213,16 +216,18 @@ fun PlayerScreen(
                     .align(Alignment.TopCenter)
             },
         )
-        IconButton(
-            onClick = onClose,
-            modifier = Modifier
-                .align(Alignment.TopStart)
-                .padding(4.dp),
-        ) {
-            Icon(
-                Icons.Default.Close, contentDescription = "Close player",
-                tint = Color.White,
-            )
+        if (controlsVisible) {
+            IconButton(
+                onClick = onClose,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(4.dp),
+            ) {
+                Icon(
+                    Icons.Default.Close, contentDescription = "Close player",
+                    tint = Color.White,
+                )
+            }
         }
         if (!fullscreen) {
             Column(
