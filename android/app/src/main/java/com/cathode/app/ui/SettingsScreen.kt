@@ -23,6 +23,11 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -116,9 +121,20 @@ fun SettingsScreen(
 
         GlassCard(Modifier.fillMaxWidth()) {
             Text("Server")
+            // The field owns its text while you type: bound straight to prefs,
+            // every keystroke round-tripped through DataStore (dropping fast
+            // keystrokes) and came back trailing-slash-trimmed, so "http://"
+            // couldn't be typed. Prefs only fill it until the first edit.
+            var urlText by remember { mutableStateOf(prefs.serverUrl) }
+            var urlEdited by remember { mutableStateOf(false) }
+            LaunchedEffect(prefs.serverUrl) { if (!urlEdited) urlText = prefs.serverUrl }
             OutlinedTextField(
-                value = prefs.serverUrl,
-                onValueChange = { onPrefs(prefs.copy(serverUrl = it)) },
+                value = urlText,
+                onValueChange = {
+                    urlText = it
+                    urlEdited = true
+                    onPrefs(prefs.copy(serverUrl = it))
+                },
                 label = { Text("Server URL") },
                 placeholder = { Text("https://server.<tailnet>.ts.net:8443") },
                 singleLine = true,
