@@ -57,7 +57,7 @@ cd android && ./gradlew assembleRelease
 adb install -r app/build/outputs/apk/release/app-release.apk
 ```
 
-In the app → Settings → enter your server URL (see Tailscale below), tap **Test connection**, then tune everything in place: polling mode + interval, download quality, SponsorBlock buttons, retention. **Save server settings** pushes the lot to the server — no SSH or `.env` editing needed day to day. The Channels tab explains how to export your subscriptions and lets you add channels or upload the export file by hand.
+In the app → Settings → enter your server URL (see Tailscale below), tap **Test connection**, then tune everything in place: polling mode + interval, download quality, SponsorBlock buttons, retention. Changes save to the server as you make them — no SSH or `.env` editing needed day to day. The Channels tab explains how to export your subscriptions and lets you add channels or upload the export file by hand.
 
 ## Remote access via Tailscale
 
@@ -74,30 +74,33 @@ Then in the app → Settings → server URL `https://<your-nas>.<tailnet>.ts.net
 
 | Mode | Behavior |
 |---|---|
-| On app open | NAS only scans when the app cold-opens / pull-to-refresh (`POST /api/subscriptions/refresh`) |
-| Periodic | + background WorkManager sync every N minutes (you set N, min 15 on Android) |
-| Instant | Server loop clamped to ≥5 min — new drops land within minutes |
+| On app open | NAS only scans when the app opens or you tap sync (`POST /api/subscriptions/refresh`) |
+| Periodic | NAS scans every N minutes (you set N); the phone syncs in the background on the same schedule (min 15 on Android) |
+| Instant | NAS scans every 5 minutes — new drops land within minutes |
 
-Poll interval slider + server push button live in Settings; server also exposes `PUT /api/settings`.
+The mode and interval live in Settings → Server config; the server also exposes `PUT /api/settings`.
 
 ### Zero cellular, bad-Wi-Fi proof
 
-- **Wi-Fi only**: `NetworkType.UNMETERED` constraints, `isUnmetered()` runtime gate (covers metered hotspots/VPNs), Media3 `Requirements.NETWORK_UNMETERED`. With the toggle ON, the app literally throws before any socket opens on cellular.
-- **Resume**: server honors `Range` (`GET /api/videos/{id}/stream`), yt-dlp uses `--continuedl` + fragment retries, app downloads use `.part` + `Range: bytes=<done>-` + exponential backoff. Drops resume fragments; progress is journaled, never discarded.
+- **Wi-Fi only**: `NetworkType.UNMETERED` constraints and an `isUnmetered()` runtime gate (covers metered hotspots/VPNs). With the toggle ON, the app throws before any socket opens on cellular.
+- **Resume**: server honors `Range` (`GET /api/videos/{id}/stream`), yt-dlp uses `--continue` + fragment retries, app downloads keep a `.part` file and resume with `Range: bytes=<done>-` + exponential backoff — also across failed attempts.
+- **Offline library**: the app keeps the last synced library on the phone, so it opens and saved videos play with no network. Where you stopped (and what you finished) is queued and sent on the next sync.
 
 ## API
 
 | Method | Path | Notes |
 |---|---|---|
 | GET | `/api/health` | poll mode, last run |
-| GET | `/api/feed?unwatched_only&channel&limit` | library |
+| GET | `/api/feed?unwatched_only&channel&limit` | library (downloaded videos only) |
 | GET | `/api/videos/{id}` | metadata |
 | GET | `/api/videos/{id}/stream` | Range-capable file |
 | GET | `/api/thumbs/{id}` | thumbnail |
 | GET/PUT | `/api/settings` | poll_mode, poll_interval_minutes, resolution, SponsorBlock, keep_days |
 | GET | `/api/subscriptions` | parsed inputs + indexed channels |
 | POST | `/api/subscriptions/refresh` | starts a background scan, returns immediately (app calls on open) |
-| POST | `/api/videos/{id}/watched?westra=true` | watch state |
+| POST | `/api/videos/{id}/progress` | `{"position_seconds": N}`; auto-marks watched near the end, never unmarks |
+| POST | `/api/videos/{id}/watched?watched=true` | watch state (`false` also rewinds to the start) |
+| POST | `/api/subscriptions/upload` | `.opml` / `.csv` (replaces that file once it parses) or `.txt` (adds) |
 
 ## Privacy / self-host notes
 

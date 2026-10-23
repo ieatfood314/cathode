@@ -53,13 +53,14 @@ def health():
 
 
 @app.get("/api/feed")
-def feed(limit: int = Query(100, le=500), unwatched_only: bool = False,
+def feed(limit: int = Query(100, le=5000), unwatched_only: bool = False,
          channel: str | None = None):
     conn = _conn()
     q = ("SELECT id, channel_id, channel_title, title, upload_date, duration, "
          "file_path, thumb_path, filesize, status, published, downloaded_at, watched, "
          "CAST(position_seconds AS INTEGER) AS position_seconds "
-         "FROM videos WHERE status='done'")
+         # A done row without a file has nothing to play: never list it.
+         "FROM videos WHERE status='done' AND file_path IS NOT NULL AND file_path != ''")
     args: list = []
     if unwatched_only:
         q += " AND watched=0"
@@ -82,25 +83,27 @@ def save_progress(video_id: str, body: ProgressIn):
     """Store where playback stopped so it resumes everywhere, from anywhere.
 
     Also auto-marks watched once you're within the last ~5% of the video,
-    so no manual button is needed.
+    so no manual button is needed. Progress only ever *sets* watched:
+    rewatching a finished video (or opening one by accident) must not quietly
+    un-mark it — unwatching is explicit, via POST /watched?watched=false.
+    Returns the video's watched state after the update.
     """
     pos = max(0.0, float(body.position_seconds or 0.0))
     conn = _conn()
-    row = conn.execute("SELECT duration FROM videos WHERE id=?", (video_id,)).fetchone()
+    row = conn.execute("SELECT duration, watched FROM videos WHERE id=?", (video_id,)).fetchone()
     if not row:
         conn.close()
         raise HTTPException(404, "unknown video")
-    auto_watched = False
-    if (row["duration"] or 0) > 0 and pos >= row["duration"] * 0.95 - 5:
+    near_end = (row["duration"] or 0) > 0 and pos >= row["duration"] * 0.95 - 5
+    if near_end:
         conn.execute(
             "UPDATE videos SET position_seconds=?, watched=1 WHERE id=?", (pos, video_id))
-        auto_watched = True
     else:
-        conn.execute(
-            "UPDATE videos SET position_seconds=?, watched=0 WHERE id=?", (pos, video_id))
+        conn.execute("UPDATE videos SET position_seconds=? WHERE id=?", (pos, video_id))
     conn.commit()
     conn.close()
-    return {"ok": True, "position_seconds": int(pos), "watched": auto_watched}
+    return {"ok": True, "position_seconds": int(pos),
+            "watched": near_end or bool(row["watched"])}
 
 
 @app.get("/api/videos/{video_id}")
@@ -167,7 +170,15 @@ def put_settings(body: SettingsIn):
     if body.keep_days is not None:
         settings.keep_days = max(0, body.keep_days)
     if body.backfill_days is not None:
-        settings.backfill_days = max(0, min(3650, body.backfill_days))
+        new_backfill = max(0, min(3650, body.backfill_days))
+        if new_backfill != settings.backfill_days:
+            # A different window may now include videos yt-dlp skipped as
+            # out of range: let the next scan try them again.
+            conn = _conn()
+            conn.execute("UPDATE videos SET status='pending' WHERE status='skipped'")
+            conn.commit()
+            conn.close()
+        settings.backfill_days = new_backfill
     if body.delete_after_watched is not None:
         settings.delete_after_watched = bool(body.delete_after_watched)
     dbmod.save_settings_snapshot(settings)
@@ -241,6 +252,25 @@ def remove_subscription(url: str = Query(...)):
     return {"ok": True, "removed": True}
 
 
+def _replace_if_valid(dest: Path, text: str, parse) -> int:
+    """Swap in an uploaded export only once it parses to at least one channel.
+
+    Validating in place would destroy the previous (working) file whenever a
+    bad upload came in. Returns the channel count; 0 leaves dest untouched.
+    """
+    tmp = dest.with_name(dest.name + ".upload")
+    tmp.write_text(text, encoding="utf-8")
+    try:
+        n = len(parse(tmp))
+    except Exception:
+        n = 0
+    if n == 0:
+        tmp.unlink(missing_ok=True)
+        return 0
+    tmp.replace(dest)
+    return n
+
+
 @app.post("/api/subscriptions/upload")
 async def upload_subscriptions(file: UploadFile = File(...)):
     """Upload a subscription export (Takeout/OPML .opml/.xml/.csv, or .txt list)."""
@@ -255,18 +285,12 @@ async def upload_subscriptions(file: UploadFile = File(...)):
     except Exception:
         raise HTTPException(400, "file must be UTF-8 text")
     if name.endswith((".opml", ".xml")):
-        dest = data_dir / "subscriptions.opml"
-        dest.write_text(text, encoding="utf-8")
-        try:
-            n = len(parse_opml(dest))
-        except Exception:
-            dest.unlink(missing_ok=True)
-            raise HTTPException(400, "not a valid OPML file")
+        n = _replace_if_valid(data_dir / "subscriptions.opml", text, parse_opml)
+        if n == 0:
+            raise HTTPException(400, "no channels found — is this a YouTube OPML export?")
         return {"ok": True, "file": "subscriptions.opml", "subscriptions": n}
     if name.endswith(".csv"):
-        dest = data_dir / "subscriptions.csv"
-        dest.write_text(text, encoding="utf-8")
-        n = len(parse_takeout_csv(dest))
+        n = _replace_if_valid(data_dir / "subscriptions.csv", text, parse_takeout_csv)
         if n == 0:
             raise HTTPException(400, "no channels found — is this a Takeout subscriptions.csv?")
         return {"ok": True, "file": "subscriptions.csv", "subscriptions": n}
@@ -302,8 +326,12 @@ def refresh():
 
 @app.post("/api/videos/{video_id}/watched")
 def mark_watched(video_id: str, watched: bool = True):
+    """Mark watched / unwatched by hand. Unwatched also rewinds to the start."""
     conn = _conn()
-    conn.execute("UPDATE videos SET watched=? WHERE id=?", (1 if watched else 0, video_id))
+    if watched:
+        conn.execute("UPDATE videos SET watched=1 WHERE id=?", (video_id,))
+    else:
+        conn.execute("UPDATE videos SET watched=0, position_seconds=0 WHERE id=?", (video_id,))
     conn.commit()
     deleted_file = False
     if watched and settings.delete_after_watched:
@@ -358,11 +386,17 @@ def stream(video_id: str, request: Request):
         return FileResponse(path, media_type=mime, filename=path.name)
 
     m = re.match(r"bytes=(\d*)-(\d*)", range_h)
-    if not m:
+    if not m or not (m.group(1) or m.group(2)):
         raise HTTPException(416, "bad range")
-    start = int(m.group(1)) if m.group(1) else 0
-    end = int(m.group(2)) if m.group(2) else size - 1
-    end = min(end, size - 1)
+    if m.group(1):
+        start = int(m.group(1))
+        end = min(int(m.group(2)) if m.group(2) else size - 1, size - 1)
+    else:
+        # Suffix range ("bytes=-N"): the last N bytes.
+        n = int(m.group(2))
+        if n == 0:
+            raise HTTPException(416, "bad range")
+        start, end = max(0, size - n), size - 1
     if start >= size or start > end:
         raise HTTPException(416, "bad range")
 

@@ -13,7 +13,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
@@ -22,11 +22,15 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -36,6 +40,8 @@ import androidx.compose.ui.unit.dp
 import com.cathode.app.data.AppPrefs
 import com.cathode.app.data.ServerSettings
 import com.cathode.app.data.VideoStore
+import kotlinx.coroutines.delay
+import kotlin.math.roundToInt
 
 /** Retention steps: every day up to a month, then 60 / 90 / 180 / 360. */
 val RETENTION_OPTIONS: List<Int> = listOf(0) + (1..30).toList() + listOf(60, 90, 180, 360)
@@ -49,6 +55,21 @@ fun retentionLabel(days: Int): String = when {
     days < 180 -> "Keep about 3 months"
     days < 360 -> "Keep about 6 months"
     else -> "Keep about a year"
+}
+
+/** Real video heights (the old free slider landed on 660p, 1260p…). */
+val RESOLUTION_OPTIONS = listOf(360, 480, 720, 1080, 1440, 2160)
+
+fun resolutionLabel(h: Int): String = when (h) {
+    1440 -> "1440p (2K)"
+    2160 -> "2160p (4K)"
+    else -> "${h}p"
+}
+
+fun intervalLabel(mins: Int): String = when {
+    mins < 60 -> "$mins min"
+    mins % 60 == 0 -> if (mins == 60) "hour" else "${mins / 60} hours"
+    else -> "${mins / 60} h ${mins % 60} min"
 }
 
 /** SponsorBlock categories: id + short button label. */
@@ -67,14 +88,10 @@ val SB_ALL = SB_CATS.map { it.first }
 
 private fun splitSb(s: String) = s.split(",").map { it.trim() }.filter { it.isNotEmpty() }.toSet()
 
-/** Toggle a category in the cut-out list (keeps at least one; drops it from an explicit mark list). */
+/** Toggle a category in the cut-out list (empty = cut nothing; drops it from an explicit mark list). */
 fun toggleRemove(s: ServerSettings, cat: String): ServerSettings {
     val set = splitSb(s.sponsorblockRemove).toMutableSet()
-    if (cat in set) {
-        if (set.size > 1) set.remove(cat)
-    } else {
-        set.add(cat)
-    }
+    if (cat in set) set.remove(cat) else set.add(cat)
     val mark = if (s.sponsorblockMark == "all") "all"
     else (splitSb(s.sponsorblockMark) - cat).joinToString(",")
     return s.copy(sponsorblockRemove = set.joinToString(","), sponsorblockMark = mark)
@@ -93,7 +110,7 @@ fun toggleMark(s: ServerSettings, cat: String): ServerSettings {
  * Everything configurable from the app: connection (LAN or Tailscale URL),
  * phone-side sync rules, and the full server config (polling, quality,
  * SponsorBlock, retention). Server fields load from GET /api/settings and
- * save with PUT /api/settings — no SSH or .env editing needed day to day.
+ * auto-save with PUT /api/settings — no SSH or .env editing needed day to day.
  */
 @Composable
 fun SettingsScreen(
@@ -101,10 +118,12 @@ fun SettingsScreen(
     server: ServerSettings?,
     serverLoading: Boolean,
     connStatus: String?,
+    serverStatus: String?,
     testing: Boolean,
     savedSummary: String?,
+    savedCount: Int,
     storageLabel: String,
-    onPrefs: (AppPrefs) -> Unit,
+    onPrefs: ((AppPrefs) -> AppPrefs) -> Unit,
     onServer: (ServerSettings) -> Unit,
     onTestConnection: () -> Unit,
     onClearSaved: () -> Unit,
@@ -121,25 +140,7 @@ fun SettingsScreen(
 
         GlassCard(Modifier.fillMaxWidth()) {
             Text("Server")
-            // The field owns its text while you type: bound straight to prefs,
-            // every keystroke round-tripped through DataStore (dropping fast
-            // keystrokes) and came back trailing-slash-trimmed, so "http://"
-            // couldn't be typed. Prefs only fill it until the first edit.
-            var urlText by remember { mutableStateOf(prefs.serverUrl) }
-            var urlEdited by remember { mutableStateOf(false) }
-            LaunchedEffect(prefs.serverUrl) { if (!urlEdited) urlText = prefs.serverUrl }
-            OutlinedTextField(
-                value = urlText,
-                onValueChange = {
-                    urlText = it
-                    urlEdited = true
-                    onPrefs(prefs.copy(serverUrl = it))
-                },
-                label = { Text("Server URL") },
-                placeholder = { Text("https://server.<tailnet>.ts.net:8443") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
+            ServerUrlField(prefs.serverUrl) { url -> onPrefs { it.copy(serverUrl = url) } }
             Text(
                 "On home Wi-Fi use http://<server>:8000; away from home use your " +
                     "Tailscale https URL. Either way, sync still obeys Wi-Fi only below.",
@@ -173,28 +174,8 @@ fun SettingsScreen(
                         style = MaterialTheme.typography.bodySmall, color = Color.Gray,
                     )
                 }
-                Switch(checked = prefs.wifiOnly, onCheckedChange = { onPrefs(prefs.copy(wifiOnly = it)) })
+                Switch(checked = prefs.wifiOnly, onCheckedChange = { on -> onPrefs { it.copy(wifiOnly = on) } })
             }
-        }
-        Spacer(Modifier.height(12.dp))
-
-        GlassCard(Modifier.fillMaxWidth()) {
-            Text("How it checks for new videos")
-            PollModeRow("When the app opens", "on_open", prefs.pollMode) { onPrefs(prefs.copy(pollMode = it)) }
-            PollModeRow("Every X minutes, in the background", "periodic", prefs.pollMode) { onPrefs(prefs.copy(pollMode = it)) }
-            PollModeRow("The moment they drop", "instant", prefs.pollMode) { onPrefs(prefs.copy(pollMode = it)) }
-            Text("Check every ${prefs.pollIntervalMin} min")
-            Slider(
-                value = prefs.pollIntervalMin.toFloat(),
-                onValueChange = { onPrefs(prefs.copy(pollIntervalMin = it.toInt().coerceIn(1, 720))) },
-                valueRange = 5f..720f,
-            )
-            Text(
-                "Opening the app always triggers a check too. Background checks below " +
-                    "15 min become 15 (Android limit); the server still grabs new " +
-                    "uploads on its own schedule.",
-                style = MaterialTheme.typography.bodySmall, color = Color.Gray,
-            )
         }
         Spacer(Modifier.height(12.dp))
 
@@ -202,46 +183,75 @@ fun SettingsScreen(
             Text("On this phone")
             SwitchRow("Save videos on this phone",
                 "Keep offline copies so anything plays with no network at all.",
-                prefs.saveOnPhone) { onPrefs(prefs.copy(saveOnPhone = it)) }
+                prefs.saveOnPhone) { on -> onPrefs { it.copy(saveOnPhone = on) } }
             SwitchRow("Save new videos automatically",
-                "When the app opens on Wi-Fi, new arrivals are saved in the background.",
-                prefs.autoSaveNew) { onPrefs(prefs.copy(autoSaveNew = it)) }
+                "After each sync, new arrivals are saved in the background.",
+                prefs.autoSaveNew) { on -> onPrefs { it.copy(autoSaveNew = on) } }
             SwitchRow("Delete phone copy after watching",
-                "Frees space automatically once you mark a video watched.",
-                prefs.deleteAfterWatched) { onPrefs(prefs.copy(deleteAfterWatched = it)) }
+                "Frees space once a video is watched — when you close it, so nothing " +
+                    "disappears mid-play.",
+                prefs.deleteAfterWatched) { on -> onPrefs { it.copy(deleteAfterWatched = on) } }
             StorageFolderRow(
                 storageLabel = storageLabel,
                 isCustom = prefs.storageUri.isNotBlank(),
-                onPick = { uri -> onPrefs(prefs.copy(storageUri = uri)) },
-                onReset = { onPrefs(prefs.copy(storageUri = "")) },
+                onPick = { uri -> onPrefs { it.copy(storageUri = uri) } },
+                onReset = { onPrefs { it.copy(storageUri = "") } },
             )
             if (savedSummary != null) {
                 Text(savedSummary, style = MaterialTheme.typography.bodySmall, color = Color.Gray)
-                OutlinedButton(onClick = onClearSaved) { Text("Clear saved videos") }
+            }
+            if (savedCount > 0) {
+                var confirmClear by remember { mutableStateOf(false) }
+                OutlinedButton(onClick = { confirmClear = true }) { Text("Clear saved videos") }
+                if (confirmClear) {
+                    AlertDialog(
+                        onDismissRequest = { confirmClear = false },
+                        title = { Text("Delete all saved videos?") },
+                        text = {
+                            Text("Removes $savedCount videos from this phone. They stay on " +
+                                "your server and can be saved again.")
+                        },
+                        confirmButton = {
+                            TextButton(onClick = { confirmClear = false; onClearSaved() }) { Text("Delete") }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { confirmClear = false }) { Text("Cancel") }
+                        },
+                    )
+                }
             }
         }
         Spacer(Modifier.height(12.dp))
 
         Text("Server config", style = MaterialTheme.typography.titleMedium)
+        if (serverStatus != null) {
+            Text(serverStatus, style = MaterialTheme.typography.bodySmall, color = AccentTeal)
+        }
         Spacer(Modifier.height(8.dp))
         if (serverLoading && server == null) {
             CircularProgressIndicator()
         } else if (server != null) {
+            PollingCard(server, onServer)
+            Spacer(Modifier.height(12.dp))
             GlassCard(Modifier.fillMaxWidth()) {
                 Text("Download quality")
-                Text("Max ${server.maxResolution}p")
+                val idx = RESOLUTION_OPTIONS.indices
+                    .minByOrNull { kotlin.math.abs(RESOLUTION_OPTIONS[it] - server.maxResolution) } ?: 3
+                Text("Up to ${resolutionLabel(RESOLUTION_OPTIONS[idx])}")
                 Slider(
-                    value = server.maxResolution.toFloat(),
+                    value = idx.toFloat(),
                     onValueChange = {
-                        onServer(server.copy(maxResolution = it.toInt().coerceIn(360, 2160)))
+                        val h = RESOLUTION_OPTIONS[it.roundToInt().coerceIn(RESOLUTION_OPTIONS.indices)]
+                        if (h != server.maxResolution) onServer(server.copy(maxResolution = h))
                     },
-                    valueRange = 360f..2160f, steps = 5,
+                    valueRange = 0f..(RESOLUTION_OPTIONS.size - 1).toFloat(),
+                    steps = RESOLUTION_OPTIONS.size - 2,
                 )
             }
             Spacer(Modifier.height(12.dp))
             GlassCard(Modifier.fillMaxWidth()) {
                 Text("What to cut out")
-                Text("These segments are removed from downloads.",
+                Text("These segments are removed from new downloads. Pick none to keep everything.",
                     style = MaterialTheme.typography.bodySmall, color = Color.Gray)
                 ChipGrid(
                     cats = SB_CATS.filter { it.first != "poi_highlight" },
@@ -265,13 +275,16 @@ fun SettingsScreen(
             GlassCard(Modifier.fillMaxWidth()) {
                 Text("Retention")
                 Text(retentionLabel(server.keepDays))
+                Text("The server deletes its downloads this long after they arrive.",
+                    style = MaterialTheme.typography.bodySmall, color = Color.Gray)
                 RetentionSlider(server.keepDays) { onServer(server.copy(keepDays = it)) }
                 Text("Backfill recent videos")
-                Text("Also grab the backlog from the last N days per channel — not just the newest uploads.",
+                Text("Also grab the backlog from the last N days per channel — not just the " +
+                    "newest uploads. Only adds downloads; never deletes any.",
                     style = MaterialTheme.typography.bodySmall, color = Color.Gray)
                 BackfillRow(server.backfillDays) { onServer(server.copy(backfillDays = it)) }
                 SwitchRow("Delete server file after watching",
-                    "Frees server space once you mark a video watched. Off by default.",
+                    "Frees server space once a video is watched (finished or marked). Off by default.",
                     server.deleteAfterWatched) { onServer(server.copy(deleteAfterWatched = it)) }
             }
         } else {
@@ -280,6 +293,76 @@ fun SettingsScreen(
             }
         }
         Spacer(Modifier.height(24.dp))
+    }
+}
+
+/**
+ * The field owns its text while you type. Saving every keystroke started a
+ * sync against each half-typed address ("h", "ht", "htt"…); now it saves
+ * once you pause, and when you leave the screen.
+ */
+@Composable
+private fun ServerUrlField(stored: String, onCommit: (String) -> Unit) {
+    var urlText by remember { mutableStateOf(stored) }
+    var urlEdited by remember { mutableStateOf(false) }
+    val commit by rememberUpdatedState(onCommit)
+    LaunchedEffect(stored) { if (!urlEdited) urlText = stored }
+    LaunchedEffect(urlText) {
+        if (!urlEdited) return@LaunchedEffect
+        delay(800)
+        commit(urlText.trim())
+    }
+    DisposableEffect(Unit) {
+        onDispose { if (urlEdited) commit(urlText.trim()) }
+    }
+    OutlinedTextField(
+        value = urlText,
+        onValueChange = {
+            urlText = it
+            urlEdited = true
+        },
+        label = { Text("Server URL") },
+        placeholder = { Text("http://192.168.1.10:8000") },
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth(),
+    )
+}
+
+@Composable
+private fun PollingCard(server: ServerSettings, onServer: (ServerSettings) -> Unit) {
+    GlassCard(Modifier.fillMaxWidth()) {
+        Text("How the server checks for new videos")
+        PollModeRow("Only when the app opens", "on_open", server.pollMode) {
+            onServer(server.copy(pollMode = it))
+        }
+        PollModeRow("On a schedule", "periodic", server.pollMode) {
+            onServer(server.copy(pollMode = it))
+        }
+        PollModeRow("Every 5 minutes — the moment they drop", "instant", server.pollMode) {
+            onServer(server.copy(pollMode = it))
+        }
+        if (server.pollMode == "periodic") {
+            // Local while dragging; one save when you let go.
+            var drag by remember(server.pollIntervalMinutes) {
+                mutableFloatStateOf(server.pollIntervalMinutes.toFloat())
+            }
+            Text("Check every ${intervalLabel(drag.toInt())}")
+            Slider(
+                value = drag,
+                onValueChange = { drag = ((it / 5f).roundToInt() * 5).coerceIn(5, 720).toFloat() },
+                onValueChangeFinished = {
+                    if (drag.toInt() != server.pollIntervalMinutes) {
+                        onServer(server.copy(pollIntervalMinutes = drag.toInt()))
+                    }
+                },
+                valueRange = 5f..720f,
+            )
+        }
+        Text(
+            "Opening the app always triggers a check too. The phone's own background " +
+                "sync runs at most every 15 min (Android limit).",
+            style = MaterialTheme.typography.bodySmall, color = Color.Gray,
+        )
     }
 }
 
@@ -324,7 +407,10 @@ private fun RetentionSlider(days: Int, onPick: (Int) -> Unit) {
     val idx = RETENTION_OPTIONS.indices.minByOrNull { kotlin.math.abs(RETENTION_OPTIONS[it] - days) } ?: 0
     Slider(
         value = idx.toFloat(),
-        onValueChange = { onPick(RETENTION_OPTIONS[it.toInt().coerceIn(RETENTION_OPTIONS.indices)]) },
+        onValueChange = {
+            val d = RETENTION_OPTIONS[it.roundToInt().coerceIn(RETENTION_OPTIONS.indices)]
+            if (d != days) onPick(d)
+        },
         valueRange = 0f..(RETENTION_OPTIONS.size - 1).toFloat(),
         steps = RETENTION_OPTIONS.size - 2,
     )

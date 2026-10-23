@@ -111,6 +111,17 @@ def now() -> int:
     return int(time.time())
 
 
+def kv_get(conn: sqlite3.Connection, k: str) -> str | None:
+    row = conn.execute("SELECT v FROM kv WHERE k=?", (k,)).fetchone()
+    return row["v"] if row else None
+
+
+def kv_set(conn: sqlite3.Connection, k: str, v: str) -> None:
+    conn.execute("INSERT INTO kv(k, v) VALUES(?, ?) ON CONFLICT(k) DO UPDATE SET v=excluded.v",
+                 (k, v))
+    conn.commit()
+
+
 # Server settings persist across container restarts (a restart loses
 # process memory otherwise — see the 0.1.6 restart that reset keep/backfill).
 PERSISTED_SETTINGS = [

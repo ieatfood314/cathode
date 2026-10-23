@@ -4,7 +4,12 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
@@ -12,20 +17,26 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Subscriptions
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import androidx.media3.common.util.UnstableApi
 import com.cathode.app.data.AppPrefs
+import com.cathode.app.data.Library
 import com.cathode.app.data.OfflineRepo
 import com.cathode.app.data.PrefsRepo
 import com.cathode.app.data.SaveState
@@ -34,45 +45,61 @@ import com.cathode.app.data.StoreLocation
 import com.cathode.app.data.Video
 import com.cathode.app.data.VideoStore
 import com.cathode.app.data.checkHealth
-import com.cathode.app.data.fetchFeed
 import com.cathode.app.data.getServerSettings
-import com.cathode.app.data.isUnmetered
 import com.cathode.app.data.putServerSettings
-import com.cathode.app.data.putProgress
 import com.cathode.app.data.resolveStore
-import com.cathode.app.data.setWatched
 import com.cathode.app.player.Playback
 import com.cathode.app.player.PlaybackService
+import com.cathode.app.player.StreamCache
+import com.cathode.app.ui.CathodeTheme
 import com.cathode.app.ui.LibraryScreen
 import com.cathode.app.ui.PlayerScreen
-import com.cathode.app.ui.CathodeTheme
 import com.cathode.app.ui.SettingsScreen
 import com.cathode.app.ui.SubscriptionsScreen
 import com.cathode.app.ui.formatBytes
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.ui.unit.dp
+import com.cathode.app.ui.rememberNetState
 import com.cathode.app.worker.SyncWorker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.File
 
 @UnstableApi
 class MainActivity : ComponentActivity() {
+    companion object {
+        /** Set by the media notification / lock screen: open the player tab. */
+        const val EXTRA_SHOW_PLAYER = "com.cathode.app.SHOW_PLAYER"
+    }
+
+    private val showPlayerRequests = mutableIntStateOf(0)
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        if (intent.getBooleanExtra(EXTRA_SHOW_PLAYER, false)) showPlayerRequests.intValue++
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val prefsRepo = PrefsRepo(this)
+        val startOnPlayer = intent?.getBooleanExtra(EXTRA_SHOW_PLAYER, false) == true
 
         setContent {
             CathodeTheme {
                 val scope = rememberCoroutineScope()
                 val appContext = LocalContext.current.applicationContext
-                val prefs by prefsRepo.flow.collectAsState(initial = AppPrefs())
-                var tab by remember { mutableStateOf(0) }
-                var videos by remember { mutableStateOf<List<Video>>(emptyList()) }
+                // null until DataStore has loaded: a blank URL then means
+                // "not read yet", not "not configured".
+                val storedPrefs by prefsRepo.flow.collectAsState(initial = null)
+                val prefs = storedPrefs ?: AppPrefs()
+                val videos by Library.videos.collectAsState()
+                val savedIds by OfflineRepo.scanned.collectAsState()
+                val saveStates by OfflineRepo.states.collectAsState()
+                // A player that outlived the activity (Back while audio
+                // played) is picked up again instead of "Nothing playing".
+                var open: Video? by remember { mutableStateOf(Playback.video) }
+                var tab by remember { mutableIntStateOf(if (startOnPlayer && open != null) 2 else 0) }
                 var loading by remember { mutableStateOf(false) }
-                var open: Video? by remember { mutableStateOf(null) }
+                var syncError by remember { mutableStateOf<String?>(null) }
                 var openUri by remember { mutableStateOf<Uri?>(null) }
                 // Hoisted from PlayerScreen: fullscreen hides the nav bar so
                 // the video fills the whole screen edge-to-edge.
@@ -81,13 +108,15 @@ class MainActivity : ComponentActivity() {
                 var serverDirty by remember { mutableStateOf(false) }
                 var serverLoading by remember { mutableStateOf(false) }
                 var connStatus by remember { mutableStateOf<String?>(null) }
+                var serverStatus by remember { mutableStateOf<String?>(null) }
                 var testing by remember { mutableStateOf(false) }
                 var savedSummary by remember { mutableStateOf<String?>(null) }
+                var savedCount by remember { mutableIntStateOf(0) }
                 var storageLabel by remember { mutableStateOf("Movies/Cathode") }
-                val saveStates by OfflineRepo.states.collectAsState()
-                val wifiBlocked = prefs.wifiOnly && !isUnmetered(this)
+                val net = rememberNetState(this@MainActivity)
+                val wifiBlocked = prefs.wifiOnly && !net.unmetered
                 val canUseNetwork = prefs.serverUrl.isNotBlank() &&
-                    (!prefs.wifiOnly || isUnmetered(this@MainActivity))
+                    (if (prefs.wifiOnly) net.unmetered else net.online)
                 val store = remember(prefs.storageUri) {
                     resolveStore(this@MainActivity, prefs.storageUri)
                 }
@@ -95,6 +124,7 @@ class MainActivity : ComponentActivity() {
                 fun streamUrl(v: Video) = "${prefs.serverUrl}/api/videos/${v.id}/stream"
 
                 fun updatePhoneSummary(n: Int, b: Long) {
+                    savedCount = n
                     savedSummary = if (n == 0) "Nothing saved on this phone yet."
                     else "$n videos · ${formatBytes(b)} saved as files."
                     storageLabel = when (val s = store) {
@@ -103,92 +133,88 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
+                suspend fun rescanPhone(loc: StoreLocation) {
+                    val (n, b) = OfflineRepo.rescan(appContext, loc)
+                    withContext(Dispatchers.Main) { updatePhoneSummary(n, b) }
+                }
+
                 fun saveVideo(v: Video) {
                     if (!prefs.saveOnPhone || !canUseNetwork) return
+                    val url = streamUrl(v)
+                    val wifiOnly = prefs.wifiOnly
                     scope.launch(Dispatchers.IO) {
-                        OfflineRepo.save(appContext, store, v, streamUrl(v), prefs.wifiOnly)
+                        OfflineRepo.save(appContext, store, v, url, wifiOnly)
                     }
                 }
 
+                // Offline or unreachable, the library shown is the one cached
+                // on disk; only a successful sync replaces it.
                 fun refresh() {
-                    if (!canUseNetwork) return
+                    val p = prefs
+                    val loc = store
+                    if (!canUseNetwork) {
+                        scope.launch(Dispatchers.IO) { rescanPhone(loc) }
+                        return
+                    }
                     loading = true
                     scope.launch(Dispatchers.IO) {
-                        val feed = runCatching { fetchFeed(prefs.serverUrl) }.getOrDefault(emptyList())
-                        val (n, b) = OfflineRepo.rescan(appContext, store)
+                        rescanPhone(loc)
+                        val result = Library.sync(appContext, OfflineRepo.scanned.value)
                         withContext(Dispatchers.Main) {
-                            videos = feed
                             loading = false
-                            updatePhoneSummary(n, b)
-                            // Save new arrivals on this phone when the app opens.
-                            // First run only sets the baseline (no surprise mass download);
-                            // afterwards, only videos newer than the last open are saved.
-                            if (prefs.saveOnPhone && prefs.autoSaveNew) {
-                                val maxPub = feed.maxOfOrNull { it.published } ?: 0
-                                val base = prefs.autoSaveBaseline
-                                scope.launch(Dispatchers.IO) {
-                                    if (base == 0L) {
-                                        prefsRepo.setBaseline(maxPub)
-                                    } else {
-                                        feed.filter {
-                                            it.watched == 0 && it.published > base &&
-                                                OfflineRepo.stateOf(it.id) is SaveState.NotSaved
-                                        }.forEach {
-                                            OfflineRepo.save(appContext, store, it,
-                                                "${prefs.serverUrl}/api/videos/${it.id}/stream",
-                                                prefs.wifiOnly)
-                                        }
-                                        prefsRepo.setBaseline(maxPub)
-                                    }
-                                }
-                            }
+                            syncError = if (result.isSuccess) null
+                            else "Couldn't reach the server — showing your library from the " +
+                                "last sync. Saved videos still play."
+                        }
+                        val feed = result.getOrNull()
+                        if (feed != null && p.saveOnPhone && p.autoSaveNew) {
+                            OfflineRepo.autoSaveNew(
+                                appContext, loc, feed,
+                                baseline = prefsRepo.flow.first().autoSaveBaseline,
+                                wifiOnly = p.wifiOnly,
+                                streamUrl = { v -> "${p.serverUrl}/api/videos/${v.id}/stream" },
+                                setBaseline = { prefsRepo.setBaseline(it) },
+                            )
                         }
                     }
                 }
 
-                // Mirror progress into the list right away so its progress
-                // bars and "Continue watching" order don't wait for a refresh.
-                fun patchPosition(id: String, pos: Int) {
-                    videos = videos.map { if (it.id == id) it.copy(positionSeconds = pos) else it }
-                }
-
-                fun markWatched(v: Video) {
-                    videos = videos.map { if (it.id == v.id) it.copy(watched = 1) else it }
-                    scope.launch(Dispatchers.IO) {
-                        runCatching { setWatched(prefs.serverUrl, v.id, true) }
-                        if (prefs.deleteAfterWatched) {
-                            OfflineRepo.remove(appContext, store, v.id)
-                        }
-                        refresh()
-                    }
-                }
-
-                // Unwatched and "start over" are the same thing: position 0
-                // (the server clears watched along with it).
-                fun resetProgress(v: Video) {
-                    videos = videos.map {
-                        if (it.id == v.id) it.copy(watched = 0, positionSeconds = 0) else it
-                    }
-                    scope.launch(Dispatchers.IO) {
-                        runCatching { putProgress(prefs.serverUrl, v.id, 0) }
-                        refresh()
-                    }
-                }
-
-                // Shared by the player's periodic saver, leaving the player
-                // screen, closing a video, and video switches: PUT tail
-                // progress; server also auto-watches past ~95%.
-                fun submitProgress(v: Video, pos: Int): Boolean {
-                    patchPosition(v.id, pos)
-                    if (!canUseNetwork) return false
-                    scope.launch(Dispatchers.IO) {
-                        runCatching {
-                            if (putProgress(prefs.serverUrl, v.id, pos)) {
-                                withContext(Dispatchers.Main) { refresh() }
-                            }
+                // Leaving a video (closed, or another one opened): record where
+                // it stopped, then free its phone copy if it's watched and
+                // that's wanted. Deferred to here so a copy never vanishes
+                // while it's playing.
+                fun leave(v: Video, posSeconds: Int?) {
+                    val deleteWatched = prefs.deleteAfterWatched
+                    val loc = store
+                    Library.scope.launch {
+                        if (posSeconds != null) Library.reportProgress(appContext, v.id, posSeconds)
+                        if (deleteWatched && Library.find(v.id)?.watched == 1 &&
+                            OfflineRepo.stateOf(v.id) is SaveState.Saved
+                        ) {
+                            OfflineRepo.remove(appContext, loc, v.id)
+                            rescanPhone(loc)
                         }
                     }
-                    return true
+                }
+
+                fun livePositionOf(v: Video?): Int? {
+                    val p = Playback.current
+                    if (v == null || p == null || Playback.videoId != v.id) return null
+                    return (p.currentPosition.coerceAtLeast(0) / 1000L).toInt()
+                }
+
+                fun setWatched(v: Video, watched: Boolean) {
+                    val deleteWatched = prefs.deleteAfterWatched
+                    val isOpen = open?.id == v.id
+                    val loc = store
+                    Library.scope.launch {
+                        Library.markWatched(appContext, v.id, watched)
+                        // The open video's copy goes when the player closes.
+                        if (watched && deleteWatched && !isOpen) {
+                            OfflineRepo.remove(appContext, loc, v.id)
+                            rescanPhone(loc)
+                        }
+                    }
                 }
 
                 // Nav taps keep `open` (and playback) alive: audio continues
@@ -196,26 +222,39 @@ class MainActivity : ComponentActivity() {
                 // closes a video.
                 fun closeVideo() {
                     val v = open
-                    val p = Playback.current
-                    if (v != null && p != null && Playback.videoId == v.id) {
-                        submitProgress(v, (p.currentPosition.coerceAtLeast(0) / 1000L).toInt())
-                    }
+                    val pos = livePositionOf(v)
                     // The screen's dispose-saver sees a released player and skips.
                     Playback.close()
                     stopService(Intent(this@MainActivity, PlaybackService::class.java))
+                    // Closing from fullscreen must bring the nav bar back.
+                    playerFullscreen = false
                     open = null
                     tab = 0
+                    if (v != null) leave(v, pos)
+                }
+
+                // Server polling is one setting with two halves: the server's
+                // loop and this phone's background sync. The server's value wins.
+                suspend fun adoptServerPolling(s: ServerSettings) {
+                    prefsRepo.update {
+                        it.copy(pollMode = s.pollMode, pollIntervalMin = s.pollIntervalMinutes)
+                    }
+                    val p = prefsRepo.flow.first()
+                    SyncWorker.schedulePeriodic(appContext, p.pollIntervalMin, p.pollMode, p.wifiOnly)
                 }
 
                 fun loadServer() {
                     if (prefs.serverUrl.isBlank()) return
-                    if (prefs.wifiOnly && !isUnmetered(this@MainActivity)) {
-                        connStatus = "Waiting for Wi-Fi (Wi-Fi only is ON)."
+                    if (!canUseNetwork) {
+                        connStatus = if (wifiBlocked) "Waiting for Wi-Fi (Wi-Fi only is ON)."
+                        else "You're offline."
                         return
                     }
                     serverLoading = true
+                    val url = prefs.serverUrl
                     scope.launch(Dispatchers.IO) {
-                        val s = runCatching { getServerSettings(prefs.serverUrl) }.getOrNull()
+                        val s = runCatching { getServerSettings(url) }.getOrNull()
+                        if (s != null) adoptServerPolling(s)
                         withContext(Dispatchers.Main) {
                             serverDirty = false
                             server = s
@@ -226,55 +265,43 @@ class MainActivity : ComponentActivity() {
                 }
 
                 fun saveServerNow(s: ServerSettings) {
+                    val url = prefs.serverUrl
                     scope.launch(Dispatchers.IO) {
-                        val ok = runCatching {
-                            // Keep phone + server polling in sync.
-                            putServerSettings(
-                                prefs.serverUrl,
-                                s.copy(
-                                    pollMode = prefs.pollMode,
-                                    pollIntervalMinutes = prefs.pollIntervalMin,
-                                ),
-                            )
-                        }.isSuccess
+                        val ok = runCatching { putServerSettings(url, s) }.isSuccess
+                        if (ok) adoptServerPolling(s)
                         withContext(Dispatchers.Main) {
-                            connStatus = if (ok) "Server settings saved."
+                            serverStatus = if (ok) "Saved to the server."
                             else "Couldn't save — will retry on your next change."
                         }
                     }
                 }
 
                 LaunchedEffect(Unit) {
-                    // NOTE: prefs here must come from the stored flow, NOT the
-                    // composable's value: on a cold start the first composition
-                    // still holds blank defaults, and writing those back would
-                    // wipe the saved server URL (the 0.1.3 restart bug).
-                    val current = prefsRepo.flow.first()
-                    if (!current.legacyCacheWiped) {
-                        File(filesDir, "cathode_cache").deleteRecursively()
-                        prefsRepo.update(current.copy(legacyCacheWiped = true))
+                    withContext(Dispatchers.IO) {
+                        Library.load(appContext)
+                        StreamCache.deleteLegacy(appContext)
                     }
-                    SyncWorker.runOnOpen(this@MainActivity)
+                    // Stored prefs, not the composable's blank first-frame defaults.
+                    val current = prefsRepo.flow.first()
+                    SyncWorker.runOnOpen(this@MainActivity, current.wifiOnly)
                     SyncWorker.schedulePeriodic(
-                        this@MainActivity, current.pollIntervalMin, current.pollMode)
+                        this@MainActivity, current.pollIntervalMin, current.pollMode, current.wifiOnly)
                 }
-                // (Re)load the library once the server URL is known. Without
-                // this the first launch shows an empty library: prefs load
-                // async, so an early refresh() runs with a blank URL.
-                LaunchedEffect(prefs.serverUrl, prefs.storageUri) {
+                // (Re)load the library once the server URL is known, the
+                // storage folder changes, or the network comes back.
+                LaunchedEffect(prefs.serverUrl, prefs.storageUri, canUseNetwork) {
+                    if (storedPrefs == null) return@LaunchedEffect
                     refresh()
                     if (tab == 3) loadServer()
                 }
                 // Load full server config whenever the Settings tab opens.
                 LaunchedEffect(tab) {
                     if (tab == 3) loadServer()
-                    // Back to the library while a video plays (the background
-                    // saver doesn't touch the list): show where it's at now.
-                    val v = open
-                    val p = Playback.current
-                    if (tab == 0 && v != null && p != null && Playback.videoId == v.id) {
-                        patchPosition(v.id, (p.currentPosition.coerceAtLeast(0) / 1000L).toInt())
-                    }
+                }
+                LaunchedEffect(showPlayerRequests.intValue) {
+                    if (showPlayerRequests.intValue == 0) return@LaunchedEffect
+                    if (open == null) open = Playback.video
+                    if (open != null) tab = 2
                 }
                 // Auto-save server settings (debounced): every change restarts
                 // the wait, so dragging a slider sends one PUT at the end.
@@ -287,17 +314,16 @@ class MainActivity : ComponentActivity() {
                     saveServerNow(s)
                 }
                 // Resolve the open video's local file (plain-file scan is IO).
-                LaunchedEffect(open?.id, saveStates[open?.id]) {
+                // In this effect's own coroutine, so a slower lookup for the
+                // previous video is cancelled instead of landing late.
+                LaunchedEffect(open?.id, saveStates[open?.id], savedIds) {
                     val v = open
-                    if (v == null) {
-                        openUri = null
-                    } else {
-                        scope.launch(Dispatchers.IO) {
-                            val uri = VideoStore.findUri(appContext, store, v.id)
-                            withContext(Dispatchers.Main) { openUri = uri }
-                        }
-                    }
+                    openUri = if (v == null) null
+                    else withContext(Dispatchers.IO) { VideoStore.findUri(appContext, store, v.id) }
                 }
+                // Back walks to the library rather than out of the app; the
+                // player handles it first while fullscreen.
+                BackHandler(enabled = tab != 0) { tab = 0 }
 
                 Scaffold(
                     bottomBar = {
@@ -305,19 +331,19 @@ class MainActivity : ComponentActivity() {
                         if (!playerFullscreen) NavigationBar {
                             NavigationBarItem(
                                 selected = tab == 0, onClick = { tab = 0 },
-                                icon = { Icon(Icons.Default.Home, null) }, label = { Text0("Library") },
+                                icon = { Icon(Icons.Default.Home, null) }, label = { Text("Library") },
                             )
                             NavigationBarItem(
                                 selected = tab == 1, onClick = { tab = 1 },
-                                icon = { Icon(Icons.Default.Subscriptions, null) }, label = { Text0("Channels") },
+                                icon = { Icon(Icons.Default.Subscriptions, null) }, label = { Text("Channels") },
                             )
                             NavigationBarItem(
                                 selected = tab == 2, onClick = { tab = 2 },
-                                icon = { Icon(Icons.Default.PlayArrow, null) }, label = { Text0("Playing") },
+                                icon = { Icon(Icons.Default.PlayArrow, null) }, label = { Text("Playing") },
                             )
                             NavigationBarItem(
                                 selected = tab == 3, onClick = { tab = 3 },
-                                icon = { Icon(Icons.Default.Settings, null) }, label = { Text0("Settings") },
+                                icon = { Icon(Icons.Default.Settings, null) }, label = { Text("Settings") },
                             )
                         }
                     }
@@ -326,51 +352,53 @@ class MainActivity : ComponentActivity() {
                     // whole window (already edge-to-edge via
                     // setDecorFitsSystemWindows(false) in PlayerScreen).
                     val contentPad = if (playerFullscreen) PaddingValues(0.dp) else pad
-                    androidx.compose.foundation.layout.Box(Modifier.padding(contentPad)) {
+                    Box(Modifier.padding(contentPad)) {
+                        val playing = open
                         when {
-                            open != null && tab == 2 -> PlayerScreen(
-                                video = open!!,
-                                streamUrl = streamUrl(open!!),
-                                artworkUrl = "${prefs.serverUrl}/api/thumbs/${open!!.id}",
+                            playing != null && tab == 2 -> PlayerScreen(
+                                video = playing,
+                                streamUrl = streamUrl(playing),
+                                artworkUrl = "${prefs.serverUrl}/api/thumbs/${playing.id}",
                                 savedUri = openUri,
-                                saveState = saveStates[open!!.id]
-                                    ?: OfflineRepo.stateOf(open!!.id),
-                                showSave = prefs.saveOnPhone && !wifiBlocked,
+                                saveState = saveStates[playing.id] ?: OfflineRepo.stateOf(playing.id),
                                 fullscreen = playerFullscreen,
                                 onFullscreenChange = { playerFullscreen = it },
                                 onClose = { closeVideo() },
-                                onProgress = { pos ->
-                                    val v = open
-                                    if (v == null) false else submitProgress(v, pos)
+                                onLeave = { pos ->
+                                    val id = playing.id
+                                    Library.scope.launch { Library.reportProgress(appContext, id, pos) }
                                 },
-                                onWatched = { markWatched(open!!) },
                             )
                             tab == 0 -> LibraryScreen(
                                 videos = videos,
                                 thumbUrl = { v -> "${prefs.serverUrl}/api/thumbs/${v.id}" },
                                 loading = loading,
                                 wifiBlocked = wifiBlocked,
+                                notice = when {
+                                    prefs.serverUrl.isBlank() || wifiBlocked -> null
+                                    !net.online -> "You're offline — showing your library from " +
+                                        "the last sync. Saved videos still play."
+                                    else -> syncError
+                                },
+                                serverConfigured = storedPrefs == null || prefs.serverUrl.isNotBlank(),
                                 saveStates = saveStates,
+                                savedIds = savedIds,
                                 showSaveButtons = prefs.saveOnPhone,
                                 onRefresh = {
-                                    SyncWorker.runOnOpen(this@MainActivity)
+                                    SyncWorker.runOnOpen(this@MainActivity, prefs.wifiOnly)
                                     refresh()
                                 },
+                                onOpenSettings = { tab = 3 },
                                 onOpen = { v ->
-                                    // Flush tail progress of whatever was playing
-                                    // first: the switch below releases that player.
+                                    // Record where the previous video stopped first:
+                                    // the switch below releases its player.
                                     val prev = open
-                                    val prevPlayer = Playback.current
-                                    if (prev != null && prevPlayer != null &&
-                                        Playback.videoId == prev.id
-                                    ) {
-                                        val pos = (prevPlayer.currentPosition
-                                            .coerceAtLeast(0) / 1000L).toInt()
-                                        submitProgress(prev, pos)
+                                    if (prev != null && prev.id != v.id) {
+                                        leave(prev, livePositionOf(prev))
+                                        // Don't let the previous video's file URI
+                                        // briefly feed the new one.
+                                        openUri = null
                                     }
-                                    // Don't let the previous video's file URI briefly
-                                    // feed the new one before rescanning resolves it.
-                                    openUri = null
                                     open = v
                                     tab = 2
                                     // Keep the media session reachable from
@@ -379,14 +407,13 @@ class MainActivity : ComponentActivity() {
                                         Intent(this@MainActivity, PlaybackService::class.java)
                                     )
                                 },
-                                onSetWatched = { v, w -> if (w) markWatched(v) else resetProgress(v) },
-                                onClearProgress = { v -> resetProgress(v) },
+                                onSetWatched = { v, w -> setWatched(v, w) },
+                                onClearProgress = { v -> setWatched(v, false) },
                                 onSave = { v -> saveVideo(v) },
                                 onRemoveSaved = { v ->
                                     scope.launch(Dispatchers.IO) {
                                         OfflineRepo.remove(appContext, store, v.id)
-                                        val (n, b) = OfflineRepo.rescan(appContext, store)
-                                        withContext(Dispatchers.Main) { updatePhoneSummary(n, b) }
+                                        rescanPhone(store)
                                     }
                                 },
                             )
@@ -396,53 +423,64 @@ class MainActivity : ComponentActivity() {
                                 server = server,
                                 serverLoading = serverLoading,
                                 connStatus = connStatus,
+                                serverStatus = serverStatus,
                                 testing = testing,
                                 savedSummary = savedSummary,
+                                savedCount = savedCount,
                                 storageLabel = storageLabel,
-                                onPrefs = { np ->
+                                onPrefs = { transform ->
                                     scope.launch {
-                                        prefsRepo.update(np)
+                                        prefsRepo.update(transform)
+                                        val np = prefsRepo.flow.first()
                                         SyncWorker.schedulePeriodic(
-                                            this@MainActivity, np.pollIntervalMin, np.pollMode
+                                            this@MainActivity, np.pollIntervalMin, np.pollMode, np.wifiOnly
                                         )
                                     }
                                 },
                                 onServer = { server = it; serverDirty = true },
                                 onTestConnection = {
                                     testing = true
+                                    val url = prefs.serverUrl
                                     scope.launch(Dispatchers.IO) {
                                         val msg = try {
-                                            val h = checkHealth(prefs.serverUrl)
-                                            val n = runCatching { fetchFeed(prefs.serverUrl).size }.getOrDefault(-1)
-                                            "Connected. " + if (n >= 0) "$n videos indexed." else h.take(120)
+                                            checkHealth(url)
+                                            val n = Library.sync(appContext, OfflineRepo.scanned.value)
+                                                .getOrNull()?.size
+                                            "Connected." + if (n != null) " $n videos in the library." else ""
                                         } catch (e: Exception) {
                                             "Failed: ${e.message}"
                                         }
                                         withContext(Dispatchers.Main) {
                                             connStatus = msg
                                             testing = false
+                                            loadServer()
                                         }
-                                        loadServer()
                                     }
                                 },
                                 onClearSaved = {
                                     scope.launch(Dispatchers.IO) {
                                         OfflineRepo.clearAll(appContext, store)
-                                        val (n, b) = OfflineRepo.rescan(appContext, store)
-                                        withContext(Dispatchers.Main) { updatePhoneSummary(n, b) }
+                                        rescanPhone(store)
                                     }
-                                 },
-                             )
-                             else -> androidx.compose.material3.Text("Nothing playing.")
-                         }
-                     }
-                 }
-             }
-         }
-     }
- }
+                                },
+                            )
+                            else -> NothingPlaying(onBrowse = { tab = 0 })
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
 
 @androidx.compose.runtime.Composable
-private fun Text0(s: String) {
-    androidx.compose.material3.Text(s)
+private fun NothingPlaying(onBrowse: () -> Unit) {
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text("Nothing playing", style = MaterialTheme.typography.titleMedium)
+            androidx.compose.material3.TextButton(onClick = onBrowse) {
+                Text("Pick something from your library")
+            }
+        }
+    }
 }

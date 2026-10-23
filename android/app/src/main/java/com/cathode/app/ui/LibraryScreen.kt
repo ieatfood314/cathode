@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DownloadDone
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -61,9 +62,15 @@ fun LibraryScreen(
     thumbUrl: (Video) -> String,
     loading: Boolean,
     wifiBlocked: Boolean,
+    // Offline / unreachable server: the list below is the last synced one.
+    notice: String?,
+    serverConfigured: Boolean,
     saveStates: Map<String, SaveState>,
+    // Videos found in the storage folder (saved in this or any earlier session).
+    savedIds: Set<String>,
     showSaveButtons: Boolean,
     onRefresh: () -> Unit,
+    onOpenSettings: () -> Unit,
     onOpen: (Video) -> Unit,
     onSetWatched: (Video, Boolean) -> Unit,
     onClearProgress: (Video) -> Unit,
@@ -72,7 +79,9 @@ fun LibraryScreen(
 ) {
     @Composable
     fun Item(v: Video) = VideoRow(
-        v, thumbUrl(v), saveStates[v.id] ?: SaveState.NotSaved, showSaveButtons,
+        v, thumbUrl(v),
+        saveStates[v.id] ?: if (v.id in savedIds) SaveState.Saved else SaveState.NotSaved,
+        showSaveButtons,
         onOpen, onSetWatched, onClearProgress, onSave, onRemoveSaved,
     )
     Column(
@@ -84,23 +93,49 @@ fun LibraryScreen(
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text("Library", style = MaterialTheme.typography.headlineMedium)
             Spacer(Modifier.weight(1f))
-            IconButton(onClick = onRefresh) {
-                Icon(Icons.Default.Refresh, contentDescription = "Sync now")
+            if (loading) {
+                CircularProgressIndicator(
+                    modifier = Modifier.padding(12.dp).size(24.dp), strokeWidth = 2.dp,
+                )
+            } else {
+                IconButton(onClick = onRefresh) {
+                    Icon(Icons.Default.Refresh, contentDescription = "Sync now")
+                }
             }
         }
-        if (wifiBlocked) {
+        if (wifiBlocked && serverConfigured) {
             GlassCard(Modifier.fillMaxWidth()) {
                 Text("Paused — waiting for Wi-Fi", color = AccentTeal)
                 Text(
-                    "Wi-Fi only is ON, so nothing uses cellular data. Reconnect to Wi-Fi and sync resumes where it stopped.",
+                    "Wi-Fi only is ON, so nothing uses cellular data. This is your library " +
+                        "from the last sync; saved videos play, and your place in them " +
+                        "syncs once you're back on Wi-Fi.",
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
             Spacer(Modifier.height(12.dp))
+        } else if (notice != null) {
+            GlassCard(Modifier.fillMaxWidth()) {
+                Text(notice, style = MaterialTheme.typography.bodySmall, color = AccentTeal)
+            }
+            Spacer(Modifier.height(12.dp))
         }
-        if (loading && videos.isEmpty()) {
+        if (videos.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
+                when {
+                    loading -> CircularProgressIndicator()
+                    !serverConfigured -> EmptyState(
+                        "Connect your server",
+                        "Enter your Cathode server's address in Settings and your " +
+                            "library shows up here.",
+                        action = "Open Settings", onAction = onOpenSettings,
+                    )
+                    else -> EmptyState(
+                        "No videos yet",
+                        "Once the server has downloaded something it appears here. " +
+                            "Add channels in the Channels tab.",
+                    )
+                }
             }
             return
         }
@@ -129,6 +164,22 @@ private fun watchFraction(v: Video): Float = when {
     v.watched == 1 -> 1f
     v.duration <= 0 -> 0f
     else -> (v.positionSeconds.toFloat() / v.duration).coerceIn(0f, 1f)
+}
+
+@Composable
+private fun EmptyState(title: String, body: String, action: String? = null, onAction: () -> Unit = {}) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(24.dp)) {
+        Text(title, style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.height(8.dp))
+        Text(
+            body, style = MaterialTheme.typography.bodySmall, color = Color.Gray,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+        )
+        if (action != null) {
+            Spacer(Modifier.height(16.dp))
+            Button(onClick = onAction) { Text(action) }
+        }
+    }
 }
 
 @Composable

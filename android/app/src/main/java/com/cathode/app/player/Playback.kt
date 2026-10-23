@@ -16,14 +16,12 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaSession
 import com.cathode.app.MainActivity
-import com.cathode.app.data.PrefsRepo
-import com.cathode.app.data.isUnmetered
-import com.cathode.app.data.putProgress
+import com.cathode.app.data.Library
+import com.cathode.app.data.Video
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
@@ -35,14 +33,18 @@ import kotlinx.coroutines.launch
  *
  * PlayerScreen attaches/detaches its PlayerView freely; the player and its
  * session are only torn down here — when a different video/source is
- * requested or the user closes it. A background coroutine keeps the server's
- * resume position fresh even while the player screen is off-screen or the
- * app is backgrounded.
+ * requested or the user closes it. A saver keeps the resume position fresh
+ * (server, or queued offline) even while the player screen is off-screen or
+ * the app is backgrounded.
  */
 @UnstableApi
 object Playback {
     val current: ExoPlayer? get() = player
     var videoId: String? = null
+        private set
+    /** What's loaded, so a recreated activity (or a tap on the media
+     *  notification) can get back to the player. */
+    var video: Video? = null
         private set
     var session: MediaSession? = null
         private set
@@ -55,28 +57,33 @@ object Playback {
             session?.let { value?.addSession(it) }
         }
     private var player: ExoPlayer? = null
-    private var prefsRepo: PrefsRepo? = null
     private var saverJob: kotlinx.coroutines.Job? = null
-    private val bg = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    // ExoPlayer must only be touched on the main thread: an IO-thread saver
+    // threw on every read, so background progress was never saved.
+    private val main = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     fun ensure(
         context: Context,
-        id: String,
+        video: Video,
         streamUrl: String,
         savedUri: Uri?,
         resumeMs: Long,
-        title: String?,
-        channel: String?,
         artworkUrl: String?,
     ): ExoPlayer {
+        val id = video.id
         val sameVideo = videoId == id && (savedUri != null) == fileSource
         val existing = player
         if (existing != null && sameVideo) return existing
+        // Same video, new source (its phone copy just finished, or was
+        // removed): carry on from where it is *now*. The position it was
+        // opened at is minutes stale by then.
+        val sourceSwap = existing != null && videoId == id
+        val startMs = if (sourceSwap) existing?.currentPosition ?: resumeMs else resumeMs
+        val keepPlaying = if (sourceSwap) existing?.playWhenReady ?: true else true
         // Session wrappers listen to their player: always retire the session
         // before the player it references.
         retireSession()
         existing?.release()
-        prefsRepo ?: PrefsRepo(context.applicationContext).also { prefsRepo = it }
         val fresh =
             if (savedUri != null) {
                 ExoPlayer.Builder(context)
@@ -90,7 +97,7 @@ object Playback {
                     .setAllowCrossProtocolRedirects(true)
                 val sourceFactory = DefaultMediaSourceFactory(
                     CacheDataSource.Factory()
-                        .setCache(PlayerHolder.getCache(context))
+                        .setCache(StreamCache.get(context))
                         .setUpstreamDataSourceFactory(upstream)
                 )
                 ExoPlayer.Builder(context).setMediaSourceFactory(sourceFactory).build()
@@ -100,10 +107,11 @@ object Playback {
         fresh.setWakeMode(if (savedUri != null) C.WAKE_MODE_LOCAL else C.WAKE_MODE_NETWORK)
         fileSource = savedUri != null
         videoId = id
+        this.video = video
         // Title/channel/thumbnail are what Android's media player shows.
         val metadata = MediaMetadata.Builder()
-            .setTitle(title)
-            .setArtist(channel)
+            .setTitle(video.title)
+            .setArtist(video.channelTitle)
             .setArtworkUri(artworkUrl?.let(Uri::parse))
             .build()
         fresh.setMediaItem(
@@ -113,30 +121,40 @@ object Playback {
                 .setMediaMetadata(metadata)
                 .build()
         )
-        if (resumeMs > 0) fresh.seekTo(resumeMs)
+        if (startMs > 0) fresh.seekTo(startMs)
         fresh.prepare()
-        fresh.playWhenReady = true
+        fresh.playWhenReady = keepPlaying
         player = fresh
         attachSessionAndSaver(context.applicationContext, fresh, id)
         return fresh
     }
 
     private fun attachSessionAndSaver(app: Context, fresh: ExoPlayer, id: String) {
-        // Session tap in Android's media player relaunches this activity.
+        // Session tap in Android's media player brings back this video's player.
         val launch = PendingIntent.getActivity(
             app, 1,
-            Intent(app, MainActivity::class.java).addFlags(
-                Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_NEW_TASK
-            ),
+            Intent(app, MainActivity::class.java)
+                .putExtra(MainActivity.EXTRA_SHOW_PLAYER, true)
+                .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_NEW_TASK),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         fresh.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(state: Int) {
                 if (state != Player.STATE_ENDED) return
-                val finalPos = runCatching {
-                    (fresh.duration.coerceAtLeast(0) / 1000L).toInt()
-                }.getOrDefault(0)
-                bg.launch { saveProgress(app, id, finalPos) }
+                // Finished, wherever you were in the app: watched (which also
+                // frees the server copy when that setting is on).
+                val finalPos = (fresh.duration.coerceAtLeast(0) / 1000L).toInt()
+                Library.scope.launch {
+                    if (finalPos > 0) Library.reportProgress(app, id, finalPos)
+                    Library.markWatched(app, id, true)
+                }
+            }
+
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                // Paused (headphones out, notification, lock screen): save now,
+                // not up to 5 s later — the app may be killed in between.
+                if (isPlaying || fresh.playbackState == Player.STATE_ENDED) return
+                report(app, id, fresh)
             }
         })
         session = MediaSession.Builder(app, fresh)
@@ -144,25 +162,17 @@ object Playback {
             .build()
             .also { service?.addSession(it) }
         saverJob?.cancel()
-        saverJob = bg.launch {
+        saverJob = main.launch {
             while (isActive) {
                 delay(5_000)
-                if (runCatching { fresh.isPlaying }.getOrDefault(false)) {
-                    val pos = runCatching {
-                        fresh.currentPosition.coerceAtLeast(0) / 1000L
-                    }.getOrDefault(-1L).toInt()
-                    if (pos >= 0) saveProgress(app, id, pos)
-                }
+                if (player === fresh && fresh.isPlaying) report(app, id, fresh)
             }
         }
     }
 
-    /** Server-side resume tracking, honoring Wi-Fi-only even in background. */
-    private suspend fun saveProgress(app: Context, id: String, pos: Int) {
-        val p = prefsRepo?.flow?.first() ?: return
-        if (p.serverUrl.isBlank()) return
-        if (p.wifiOnly && !isUnmetered(app)) return
-        runCatching { putProgress(p.serverUrl, id, pos) }
+    private fun report(app: Context, id: String, p: ExoPlayer) {
+        val pos = (p.currentPosition.coerceAtLeast(0) / 1000L).toInt()
+        Library.scope.launch { Library.reportProgress(app, id, pos) }
     }
 
     private fun retireSession() {
@@ -180,5 +190,6 @@ object Playback {
         player?.release()
         player = null
         videoId = null
+        video = null
     }
 }

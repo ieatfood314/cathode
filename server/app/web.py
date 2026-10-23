@@ -32,6 +32,7 @@ button:hover { border-color: #8b7cff; }
 #settings { margin-top: 20px; border-top: 1px solid #222; padding-top: 12px; display: grid; gap: 8px; max-width: 480px; }
 #settings label { font-size: .8rem; color: #aaa; }
 #settings input, #settings select { width: 100%; box-sizing: border-box; }
+#s_status { color: #5eead4; font-size: .85rem; }
 </style>
 </head>
 <body>
@@ -63,7 +64,8 @@ button:hover { border-color: #8b7cff; }
   <label>SponsorBlock: chapter-mark <input id="s_sponsorblock_mark"></label>
   <label>Keep days (0 = forever) <input id="s_keep_days" type="number" min="0" max="3650"></label>
   <label>Backfill days (0 = off) <input id="s_backfill_days" type="number" min="0" max="3650"></label>
-  <button onclick="saveSettings()">Save settings</button>
+  <label><input type="checkbox" id="s_delete_after_watched" style="width:auto"> Delete server file after watching</label>
+  <div class="bar"><button onclick="saveSettings()">Save settings</button><span id="s_status"></span></div>
 </div>
 <script>
 let current = null;
@@ -139,6 +141,7 @@ async function loadSettings() {
     for (const k of ['poll_mode', 'poll_interval_minutes', 'max_resolution',
                      'sponsorblock_remove', 'sponsorblock_mark', 'keep_days', 'backfill_days'])
       $('s_' + k).value = s[k];
+    $('s_delete_after_watched').checked = !!s.delete_after_watched;
   } catch (e) {}
 }
 async function saveSettings() {
@@ -150,13 +153,16 @@ async function saveSettings() {
     sponsorblock_mark: $('s_sponsorblock_mark').value,
     keep_days: +$('s_keep_days').value,
     backfill_days: +$('s_backfill_days').value,
+    delete_after_watched: $('s_delete_after_watched').checked,
   };
   try {
     await api('/api/settings', {method: 'PUT',
       headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
-    $('status').textContent = 'settings saved';
-  } catch (e) { $('status').textContent = 'save failed: ' + e.message; }
+    $('s_status').textContent = 'settings saved';
+  } catch (e) { $('s_status').textContent = 'save failed: ' + e.message; }
 }
+$('vid').addEventListener('pause', saveProgress);
+window.addEventListener('pagehide', () => { if (current) saveProgress(); });
 $('unwatched').onchange = load;
 load(); loadSettings();
 </script>

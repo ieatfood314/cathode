@@ -3,7 +3,10 @@ package com.cathode.app.data
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -25,11 +28,42 @@ fun isUnmetered(context: Context): Boolean {
         caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
 }
 
-fun baseClient(): OkHttpClient = OkHttpClient.Builder()
-    .connectTimeout(30, TimeUnit.SECONDS)
-    .readTimeout(60, TimeUnit.SECONDS)
-    .retryOnConnectionFailure(true)
-    .build()
+/** Any usable connection at all (Wi-Fi only OFF lets the app use these). */
+fun isOnline(context: Context): Boolean {
+    val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+    val net = cm.activeNetwork ?: return false
+    val caps = cm.getNetworkCapabilities(net) ?: return false
+    return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+}
+
+/** Whether the app may talk to the server right now under the Wi-Fi only rule. */
+fun networkAllowed(context: Context, wifiOnly: Boolean): Boolean =
+    if (wifiOnly) isUnmetered(context) else isOnline(context)
+
+// One client for the whole app: each OkHttpClient owns a connection pool and
+// thread pools, so building one per request leaked idle threads.
+private val sharedClient: OkHttpClient by lazy {
+    OkHttpClient.Builder()
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(60, TimeUnit.SECONDS)
+        .retryOnConnectionFailure(true)
+        .build()
+}
+
+fun baseClient(): OkHttpClient = sharedClient
+
+class HttpStatusException(val code: Int, msg: String) : IllegalStateException(msg)
+
+/** FastAPI errors arrive as {"detail": "..."}; show the sentence, not the JSON. */
+fun serverDetail(body: String): String = runCatching {
+    json.parseToJsonElement(body).jsonObject["detail"]?.jsonPrimitive?.content
+}.getOrNull() ?: body
+
+@Serializable
+data class AddChannelResponse(val added: Boolean = false, val url: String = "")
+
+@Serializable
+data class UploadResponse(val file: String = "", val subscriptions: Int = 0)
 
 fun requireWifiIfEnabled(context: Context, wifiOnly: Boolean) {
     if (wifiOnly && !isUnmetered(context)) {
@@ -40,7 +74,7 @@ fun requireWifiIfEnabled(context: Context, wifiOnly: Boolean) {
 class WifiBlockedException(msg: String) : IllegalStateException(msg)
 
 fun fetchFeed(baseUrl: String, unwatchedOnly: Boolean = false): List<Video> {
-    val url = "$baseUrl/api/feed?limit=200" + if (unwatchedOnly) "&unwatched_only=true" else ""
+    val url = "$baseUrl/api/feed?limit=2000" + if (unwatchedOnly) "&unwatched_only=true" else ""
     baseClient().newCall(Request.Builder().url(url).build()).execute().use { resp ->
         if (!resp.isSuccessful) throw IllegalStateException("feed HTTP ${resp.code}")
         return json.decodeFromString(
@@ -52,23 +86,27 @@ fun fetchFeed(baseUrl: String, unwatchedOnly: Boolean = false): List<Video> {
 
 /** Tell the server where playback stopped so this video resumes — on this
  *  phone, across app restarts, and anywhere else that opens the same library.
- *  Returns true when the server marked it watched (past ~95%). */
+ *  Returns the server's watched state afterwards (it auto-marks past ~95%).
+ *  Throws when the server didn't take it. */
 fun putProgress(baseUrl: String, videoId: String, positionSeconds: Int): Boolean {
     val body = "{\"position_seconds\":$positionSeconds}".toRequestBody("application/json".toMediaType())
     baseClient().newCall(
         Request.Builder().url("$baseUrl/api/videos/$videoId/progress").post(body).build()
     ).execute().use { resp ->
-        if (!resp.isSuccessful) return false
+        if (!resp.isSuccessful) throw HttpStatusException(resp.code, "progress HTTP ${resp.code}")
         return resp.body?.string()?.contains("\"watched\":true") == true
     }
 }
 
-/** Mark a video watched / unwatched by hand (long-press menu, end of playback). */
+/** Mark a video watched / unwatched (long-press menu, end of playback).
+ *  Unwatched also rewinds it to the start. Throws when the server didn't take it. */
 fun setWatched(baseUrl: String, videoId: String, watched: Boolean) {
     baseClient().newCall(
         Request.Builder().url("$baseUrl/api/videos/$videoId/watched?watched=$watched")
             .post(ByteArray(0).toRequestBody(null)).build()
-    ).execute().close()
+    ).execute().use { resp ->
+        if (!resp.isSuccessful) throw HttpStatusException(resp.code, "watched HTTP ${resp.code}")
+    }
 }
 
 fun triggerServerPoll(baseUrl: String): String {
@@ -123,7 +161,7 @@ fun listSubscriptions(baseUrl: String): SubsResponse {
 }
 
 /** Track one more channel (URL, @handle, or channel ID). */
-fun addChannel(baseUrl: String, url: String): String {
+fun addChannel(baseUrl: String, url: String): AddChannelResponse {
     // Hand-rolled JSON for one string field (correctly escapes \ and ").
     val esc = url.replace("\\", "\\\\").replace("\"", "\\\"")
     val body = "{\"url\":\"$esc\"}".toRequestBody("application/json".toMediaType())
@@ -131,8 +169,9 @@ fun addChannel(baseUrl: String, url: String): String {
         Request.Builder().url("$baseUrl/api/subscriptions").post(body).build()
     ).execute().use { resp ->
         val text = resp.body?.string().orEmpty()
-        if (!resp.isSuccessful) throw IllegalStateException(text.ifEmpty { "add HTTP ${resp.code}" })
-        return text
+        if (!resp.isSuccessful) throw IllegalStateException(serverDetail(text).ifEmpty { "add HTTP ${resp.code}" })
+        return runCatching { json.decodeFromString(AddChannelResponse.serializer(), text) }
+            .getOrDefault(AddChannelResponse(added = true, url = url))
     }
 }
 
@@ -143,13 +182,14 @@ fun removeChannel(baseUrl: String, url: String) {
         Request.Builder().url("$baseUrl/api/subscriptions?url=$encoded").delete().build()
     ).execute().use { resp ->
         if (!resp.isSuccessful) {
-            throw IllegalStateException(resp.body?.string().orEmpty().ifEmpty { "remove HTTP ${resp.code}" })
+            throw IllegalStateException(
+                serverDetail(resp.body?.string().orEmpty()).ifEmpty { "remove HTTP ${resp.code}" })
         }
     }
 }
 
-/** Upload a subscription export (.opml/.csv/.txt). Returns the server's message. */
-fun uploadSubscriptions(baseUrl: String, filename: String, bytes: ByteArray): String {
+/** Upload a subscription export (.opml/.csv/.txt). */
+fun uploadSubscriptions(baseUrl: String, filename: String, bytes: ByteArray): UploadResponse {
     val part = okhttp3.MultipartBody.Builder().setType(okhttp3.MultipartBody.FORM)
         .addFormDataPart("file", filename, bytes.toRequestBody("text/plain".toMediaType()))
         .build()
@@ -157,8 +197,9 @@ fun uploadSubscriptions(baseUrl: String, filename: String, bytes: ByteArray): St
         Request.Builder().url("$baseUrl/api/subscriptions/upload").post(part).build()
     ).execute().use { resp ->
         val text = resp.body?.string().orEmpty()
-        if (!resp.isSuccessful) throw IllegalStateException(text.ifEmpty { "upload HTTP ${resp.code}" })
-        return text
+        if (!resp.isSuccessful) throw IllegalStateException(serverDetail(text).ifEmpty { "upload HTTP ${resp.code}" })
+        return runCatching { json.decodeFromString(UploadResponse.serializer(), text) }
+            .getOrDefault(UploadResponse())
     }
 }
 

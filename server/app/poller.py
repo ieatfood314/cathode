@@ -4,7 +4,7 @@ Modes (see config.poll_mode, changeable at runtime via PUT /api/settings):
 - on_open: no loop; only runs when the app POSTs /api/subscriptions/refresh
   (the Android app does this on every cold open + on pull-to-refresh).
 - periodic: loop every poll_interval_minutes.
-- instant: loop with interval clamped to max(5, poll_interval_minutes) so new
+- instant: loop every 5 minutes regardless of poll_interval_minutes, so new
   drops land on the NAS within minutes of publishing ("the moment they drop").
 
 Cellular note: the *server* uses its wired/NAS link, never the phone's
@@ -14,6 +14,7 @@ so nothing ever touches cellular data.
 """
 
 import json
+import re
 import sqlite3
 import subprocess
 import threading
@@ -22,9 +23,33 @@ from pathlib import Path
 
 from . import db as dbmod
 from .config import settings
-from .downloader import (cutoff_ymd, backfill_dateafter, discover_channel_videos,
+from .downloader import (backfill_dateafter, discover_channel_videos,
                          download_video, resolve_channel_id)
 from .subscriptions import Subscription, load_subscriptions
+
+# Rows the scan must leave alone: removed on purpose (retention, watched with
+# delete-after-watched) or already found to be un-downloadable by yt-dlp.
+# Retrying them re-ran yt-dlp, which exits 0 without writing anything for
+# archived ids, and the row came back as a playable-looking 'done' with no file.
+SKIP_STATUSES = ("pruned", "deleted", "skipped")
+INSTANT_INTERVAL_MINUTES = 5
+_ID_IN_NAME = re.compile(r"\[([A-Za-z0-9_-]{6,})\]")
+MEDIA_EXTS = (".mp4", ".mkv", ".webm")
+THUMB_EXTS = (".jpg", ".webp", ".png")
+
+
+def is_video_id(vid: str | None) -> bool:
+    """Flat channel scans mix in channel entries (UC + 22 chars). Video ids
+    are 11 chars and may themselves start with "UC", so check the length."""
+    return bool(vid) and not (vid.startswith("UC") and len(vid) == 24)
+
+
+def _pick_files(files: list[Path]) -> tuple[Path | None, Path | None, Path | None]:
+    files = sorted(files)
+    main = next((p for p in files if p.suffix.lower() in MEDIA_EXTS), None)
+    thumb = next((p for p in files if p.suffix.lower() in THUMB_EXTS), None)
+    info = next((p for p in files if p.name.endswith(".info.json")), None)
+    return main, thumb, info
 
 
 class Poller:
@@ -34,6 +59,7 @@ class Poller:
         self.last_run: int = 0
         self.last_result: dict = {}
         self.running_scan: bool = False
+        self._lock = threading.Lock()
 
     def start(self):
         if self._thread and self._thread.is_alive():
@@ -49,10 +75,9 @@ class Poller:
         mode = (settings.poll_mode or "periodic").lower()
         if mode == "on_open":
             return 0  # no background loop
-        mins = max(1, settings.poll_interval_minutes or 30)
         if mode == "instant":
-            mins = max(5, mins)
-        return mins * 60
+            return INSTANT_INTERVAL_MINUTES * 60
+        return max(1, settings.poll_interval_minutes or 30) * 60
 
     def _loop(self):
         while not self._stop.is_set():
@@ -66,10 +91,21 @@ class Poller:
                 pass
             self._stop.wait(interval)
 
+    def _claim(self) -> bool:
+        """Atomically take the one scan slot (periodic loop, app refreshes and
+        web clicks all race for it)."""
+        with self._lock:
+            if self.running_scan:
+                return False
+            self.running_scan = True
+            return True
+
     def scan_once(self) -> dict:
-        if self.running_scan:
+        if not self._claim():
             return {"skipped": "already running"}
-        self.running_scan = True
+        return self._run_claimed()
+
+    def _run_claimed(self) -> dict:
         try:
             data_dir = Path(settings.data_dir)
             media_dir = Path(settings.media_dir)
@@ -81,9 +117,12 @@ class Poller:
             subs = load_subscriptions(data_dir)
             conn = dbmod.connect(settings.db_path)
             repaired = self._repair_missing_paths(conn, media_dir)
-            # One-time migrations, both idempotent (ffprobe checks each file):
-            reclaimed = self._prune_beyond_backfill(conn, media_dir)
-            scaled = self._strip_cover_streams(conn, media_dir)
+            # One-time migration: new downloads never embed cover art, so
+            # once every old file has been checked there is nothing left to do.
+            scaled = 0
+            if dbmod.kv_get(conn, "cover_strip_done") != "1":
+                scaled = self._strip_cover_streams(conn, media_dir)
+                dbmod.kv_set(conn, "cover_strip_done", "1")
             discovered = downloaded = failed = 0
             for sub in subs:
                 try:
@@ -101,7 +140,6 @@ class Poller:
                 "discovered": discovered,
                 "downloaded": downloaded,
                 "repaired": repaired,
-                "reclaimed": reclaimed,
                 "cover_art_stripped": scaled,
                 "failed": failed,
                 "at": self.last_run,
@@ -117,19 +155,18 @@ class Poller:
         longer than a phone's HTTP timeout — so the API never blocks on it.
         The app calls this on open, then reads GET /api/feed afterwards.
         """
-        with threading.Lock():
-            if self.running_scan:
-                return {"started": False, "reason": "already running",
-                        "last_result": self.last_result}
-            t = threading.Thread(target=self._guarded_scan, daemon=True,
-                                 name="cathode-scan-once")
-            t.start()
-            return {"started": True, "last_result": self.last_result}
+        if not self._claim():
+            return {"started": False, "reason": "already running",
+                    "last_result": self.last_result}
+        t = threading.Thread(target=self._guarded_scan, daemon=True,
+                             name="cathode-scan-once")
+        t.start()
+        return {"started": True, "last_result": self.last_result}
 
     def _guarded_scan(self):
         try:
-            self.scan_once()
-        except Exception as e:
+            self._run_claimed()
+        except Exception:
             import traceback
             print("cathode: poller task crashed:", traceback.format_exc(), flush=True)
 
@@ -167,16 +204,21 @@ class Poller:
             if vids:
                 break
         if backfill > 0 and vids:
-            vids = self._apply_backfill(channel_id, vids, backfill)
+            # Dates already known locally never cost another yt-dlp lookup.
+            known = {r["id"]: r["upload_date"] for r in conn.execute(
+                "SELECT id, upload_date FROM videos WHERE channel_id=? "
+                "AND upload_date IS NOT NULL AND upload_date != ''", (channel_id,))}
+            vids = self._apply_backfill(channel_id, vids, backfill, known)
         disc = down = fail = 0
         for v in vids:
             vid = v.get("id")
-            if not vid or vid.startswith("UC"):
+            if not is_video_id(vid):
                 continue  # playlist/channel entries, not videos
             disc += 1
             cur = conn.execute("SELECT status, file_path FROM videos WHERE id=?", (vid,)).fetchone()
-            if cur and cur["status"] == "done" and cur["file_path"]:
-                continue  # done rows with an empty path are re-repaired below
+            if cur and (cur["status"] in SKIP_STATUSES
+                        or (cur["status"] == "done" and cur["file_path"])):
+                continue
             dbmod.upsert_video(conn, {
                 "id": vid,
                 "channel_id": channel_id,
@@ -193,17 +235,24 @@ class Poller:
             if ok:
                 # NOTE: yt-dlp names files "... [id].mp4" — the id is followed
                 # by "]", so the glob must be *id* (NOT *id.* which matches nothing).
-                files = sorted(p for p in media_dir.rglob(f"*{vid}*") if p.is_file())
-                main = next((p for p in files if p.suffix.lower() in (".mp4", ".mkv", ".webm")), None)
-                thumb = next((p for p in files if p.suffix.lower() in (".jpg", ".webp", ".png")), None)
-                info = next((p for p in files if p.name.endswith(".info.json")), None)
-                size = main.stat().st_size if main and main.exists() else 0
+                main, thumb, info = _pick_files(
+                    [p for p in media_dir.rglob(f"*{vid}*") if p.is_file()])
+                if main is None:
+                    # yt-dlp exits 0 without writing a file when the id is
+                    # already in the download archive or the upload date falls
+                    # outside --dateafter. Nothing to serve, so never 'done'.
+                    conn.execute(
+                        "UPDATE videos SET status='skipped', error=? WHERE id=?",
+                        ("yt-dlp skipped it (already archived, or outside the backfill window)",
+                         vid))
+                    conn.commit()
+                    continue
                 dbmod.mark_downloaded(
                     conn, vid,
-                    str(main.relative_to(media_dir)) if main else "",
+                    str(main.relative_to(media_dir)),
                     str(thumb.relative_to(media_dir)) if thumb else "",
                     str(info.relative_to(media_dir)) if info else "",
-                    size,
+                    main.stat().st_size,
                 )
                 self._enrich_from_info(conn, vid, info)
                 down += 1
@@ -215,7 +264,8 @@ class Poller:
         conn.commit()
         return (disc, down, fail)
 
-    def _apply_backfill(self, channel_id: str | None, vids: list[dict], days: int) -> list[dict]:
+    def _apply_backfill(self, channel_id: str | None, vids: list[dict], days: int,
+                        known: dict[str, str] | None = None) -> list[dict]:
         """Keep only videos dated within the last N days.
 
         Flat scans carry no dates, so dates come from the free RSS feed first
@@ -228,15 +278,18 @@ class Poller:
         """
         from .downloader import cutoff_ymd, fetch_rss_recent, resolve_upload_dates
         cutoff = cutoff_ymd(days)
-        dated: dict[str, str] = fetch_rss_recent(channel_id) if channel_id else {}
-        flat_ids = [v.get("id") for v in vids
-                    if v.get("id") and not str(v.get("id")).startswith("UC")]
-        dated.update(resolve_upload_dates([i for i in flat_ids if i not in dated]))
+        dated: dict[str, str] = dict(known or {})
+        if channel_id:
+            dated.update(fetch_rss_recent(channel_id))
+        flat_ids = [v.get("id") for v in vids if is_video_id(v.get("id"))]
+        missing = [i for i in flat_ids if i not in dated]
+        if missing:
+            dated.update(resolve_upload_dates(missing))
         grace = max(1, settings.max_videos_per_channel_scan)
         kept = []
         for idx, v in enumerate(vids):
             vid = v.get("id")
-            if not vid or str(vid).startswith("UC"):
+            if not is_video_id(vid):
                 continue
             d = dated.get(vid)
             if d is None and idx >= grace:
@@ -256,14 +309,19 @@ class Poller:
         fixed = 0
         rows = conn.execute(
             "SELECT id FROM videos WHERE status='done' AND (file_path IS NULL OR file_path='')").fetchall()
+        if not rows:
+            return 0
+        # One walk of the library instead of one per row.
+        by_id: dict[str, list[Path]] = {}
+        for p in media_dir.rglob("*"):
+            m = _ID_IN_NAME.search(p.name)
+            if m and p.is_file():
+                by_id.setdefault(m.group(1), []).append(p)
         for row in rows:
             vid = row["id"]
-            files = sorted(p for p in media_dir.rglob(f"*{vid}*") if p.is_file())
-            main = next((p for p in files if p.suffix.lower() in (".mp4", ".mkv", ".webm")), None)
+            main, thumb, info = _pick_files(by_id.get(vid, []))
             if not main:
                 continue
-            thumb = next((p for p in files if p.suffix.lower() in (".jpg", ".webp", ".png")), None)
-            info = next((p for p in files if p.name.endswith(".info.json")), None)
             dbmod.mark_downloaded(
                 conn, vid, str(main.relative_to(media_dir)),
                 str(thumb.relative_to(media_dir)) if thumb else "",
@@ -329,42 +387,6 @@ class Poller:
             except OSError:
                 pass
 
-    def _prune_beyond_backfill(self, conn: sqlite3.Connection, media_dir: Path) -> int:
-        """Delete downloads older than the backfill window.
-
-        An earlier backfill bug kept undatable videos and grabbed whole
-        channel archives (going back years, tens of GB). One-time repair for
-        that hoard: any done video whose upload date predates the backfill
-        window is deleted and marked 'pruned' (archive entries are kept, so
-        it is not re-downloaded). Runs on every scan; once everything in
-        range is reached it's a cheap no-op.
-        """
-        backfill = max(0, settings.backfill_days or 0)
-        if backfill <= 0:
-            return 0
-        cutoff = cutoff_ymd(backfill)
-        rows = conn.execute(
-            "SELECT id FROM videos WHERE status='done' "
-            "AND upload_date IS NOT NULL AND upload_date != '' AND upload_date < ?",
-            (cutoff,)).fetchall()
-        n = 0
-        for row in rows:
-            vid = row["id"]
-            for p in media_dir.rglob(f"*{vid}*"):
-                try:
-                    if p.is_file():
-                        p.unlink()
-                except OSError:
-                    pass
-            conn.execute(
-                "UPDATE videos SET status='pruned', file_path='', thumb_path='', "
-                "info_path='', filesize=0 WHERE id=?", (vid,))
-            n += 1
-        if n:
-            conn.commit()
-            self._rmdir_empty(media_dir)
-        return n
-
     def _strip_cover_streams(self, conn: sqlite3.Connection, media_dir: Path) -> int:
         """Remove embedded cover-art video streams that break phone playback.
 
@@ -376,7 +398,8 @@ class Poller:
         file). Idempotent and cheap to re-run.
         """
         PROBE = ["ffprobe", "-v", "error", "-select_streams", "v",
-                 "-show_entries", "stream=codec_name", "-of", "csv=p=0"]
+                 "-show_entries", "stream=index,codec_name", "-of", "csv=p=0"]
+        COVER_CODECS = ("mjpeg", "png", "gif")
         fixed = 0
         rows = conn.execute(
             "SELECT id, file_path FROM videos WHERE status='done' AND file_path != ''"
@@ -388,14 +411,17 @@ class Poller:
             try:
                 proc = subprocess.run(PROBE + [str(path)], capture_output=True,
                                       text=True, timeout=30)
-                codecs = [l.strip() for l in proc.stdout.splitlines() if l.strip()]
-                # A bare cover-art stream is mjpeg/png; keep the real video
-                # (first hex264 codec) when the main track is also mjpeg.
-                if len(codecs) <= 1 or (
-                        "mjpeg" not in codecs and "png" not in codecs and "gif" not in codecs):
+                streams = [l.strip().split(",", 1) for l in proc.stdout.splitlines()
+                           if "," in l]
+                codecs = [c for _, c in streams]
+                if len(codecs) <= 1 or not any(c in COVER_CODECS for c in codecs):
+                    continue
+                # Keep the first real video stream, wherever the cover sits.
+                real = next((i for i, c in streams if c not in COVER_CODECS), None)
+                if real is None:
                     continue
                 tmp = path.with_suffix(path.suffix + ".covers.tmp")
-                execs = ["ffmpeg", "-y", "-i", str(path), "-map", "0:v:0",
+                execs = ["ffmpeg", "-y", "-i", str(path), "-map", f"0:{real}",
                          "-map", "0:a?", "-map", "0:s?", "-c", "copy", "-f", "mp4", str(tmp)]
                 proc2 = subprocess.run(execs, capture_output=True, timeout=600)
                 if proc2.returncode == 0 and tmp.exists() and tmp.stat().st_size > path.stat().st_size * 0.9:

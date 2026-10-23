@@ -61,6 +61,9 @@ fun SubscriptionsScreen(serverUrl: String) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var inputs by remember { mutableStateOf<List<SubInput>>(emptyList()) }
+    // Channel names the server has resolved, by source URL (hand-added
+    // entries carry no title of their own).
+    var titles by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     var loading by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
@@ -70,9 +73,12 @@ fun SubscriptionsScreen(serverUrl: String) {
         if (serverUrl.isBlank()) return
         loading = true
         scope.launch(Dispatchers.IO) {
-            val list = runCatching { listSubscriptions(serverUrl).inputs }.getOrNull()
+            val resp = runCatching { listSubscriptions(serverUrl) }.getOrNull()
             withContext(Dispatchers.Main) {
-                if (list != null) inputs = list
+                if (resp != null) {
+                    inputs = resp.inputs
+                    titles = resp.indexed.mapNotNull { c -> c.title?.let { c.url to it } }.toMap()
+                }
                 loading = false
             }
         }
@@ -85,7 +91,7 @@ fun SubscriptionsScreen(serverUrl: String) {
             val msg = try {
                 op()
             } catch (e: Exception) {
-                "Failed: ${e.message}"
+                e.message ?: "Something went wrong — try again."
             }
             withContext(Dispatchers.Main) {
                 message = msg
@@ -108,7 +114,8 @@ fun SubscriptionsScreen(serverUrl: String) {
             val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
                 ?: return@runOp "Could not read that file."
             val resp = uploadSubscriptions(serverUrl, "upload.$ext", bytes)
-            "Saved ($resp)"
+            if (ext == "txt") "Added ${resp.subscriptions} new channels from that list."
+            else "Uploaded — now tracking ${resp.subscriptions} channels from that file."
         }
     }
 
@@ -139,9 +146,11 @@ fun SubscriptionsScreen(serverUrl: String) {
         GlassCard(Modifier.fillMaxWidth()) {
             Text("How to add everything at once")
             Text(
-                "1. On a computer, open Google Takeout, export YouTube subscriptions.\n" +
-                    "2. You'll get a subscriptions file (.opml or .csv).\n" +
-                    "3. Upload it below — the server starts tracking every channel.",
+                "1. On a computer, open Google Takeout and export YouTube → subscriptions.\n" +
+                    "2. You'll get subscriptions.csv (an .opml export from another app works too).\n" +
+                    "3. Upload it below — the server starts tracking every channel.\n" +
+                    "A new .csv or .opml replaces the last one of that kind; a .txt list " +
+                    "adds to what's there.",
                 style = MaterialTheme.typography.bodySmall, color = Color.Gray,
             )
             Spacer(Modifier.height(8.dp))
@@ -167,7 +176,10 @@ fun SubscriptionsScreen(serverUrl: String) {
                     val u = newUrl.trim()
                     if (u.isNotEmpty()) {
                         newUrl = ""
-                        runOp("add") { addChannel(serverUrl, u); "Now tracking $u" }
+                        runOp("add") {
+                            val r = addChannel(serverUrl, u)
+                            if (r.added) "Now tracking ${r.url}" else "Already tracking that channel."
+                        }
                     }
                 },
                 enabled = !busy && serverUrl.isNotBlank(),
@@ -190,7 +202,7 @@ fun SubscriptionsScreen(serverUrl: String) {
             GlassCard(Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Text(s.title ?: s.channelId ?: s.sourceUrl,
+                        Text(s.title ?: titles[s.sourceUrl] ?: s.channelId ?: s.sourceUrl,
                             style = MaterialTheme.typography.titleSmall)
                         Text(originLabel(s.origin),
                             style = MaterialTheme.typography.bodySmall, color = Color.Gray)

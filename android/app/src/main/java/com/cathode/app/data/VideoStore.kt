@@ -109,7 +109,8 @@ object VideoStore {
             is StoreLocation.CustomFolder -> {
                 DocumentFile.fromTreeUri(context, loc.treeUri)?.listFiles()?.forEach { dir ->
                     (if (dir.isDirectory) dir.listFiles().toList() else listOf(dir))
-                        .filter { it.name?.endsWith(".part") == true }
+                        // ".part.mp4": partials from builds that named them with a video mime.
+                        .filter { it.name.orEmpty().let { n -> n.endsWith(".part") || n.endsWith(".part.mp4") } }
                         .forEach { runCatching { it.delete() } }
                 }
             }
@@ -148,19 +149,32 @@ object VideoStore {
 
     /** Final resting place for a completed download (MediaStore default). */
     fun publishToMediaStore(context: Context, v: Video, part: File): Uri {
+        val q = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
         val values = ContentValues().apply {
             put(MediaStore.Video.Media.DISPLAY_NAME, videoFileName(v))
             put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            if (q) {
                 put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/Cathode/${channelDirName(v)}/")
+                // Hidden from scans until fully written: a copy cut short
+                // (storage full, app killed) must never count as saved.
+                put(MediaStore.MediaColumns.IS_PENDING, 1)
             }
         }
         val uri = context.contentResolver.insert(
             MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values
         ) ?: throw IllegalStateException("could not create library entry")
-        context.contentResolver.openOutputStream(uri, "w")?.use { out ->
-            part.inputStream().use { it.copyTo(out) }
-        } ?: throw IllegalStateException("could not write library entry")
+        try {
+            context.contentResolver.openOutputStream(uri, "w")?.use { out ->
+                part.inputStream().use { it.copyTo(out) }
+            } ?: throw IllegalStateException("could not write library entry")
+            if (q) {
+                context.contentResolver.update(
+                    uri, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
+            }
+        } catch (e: Exception) {
+            runCatching { context.contentResolver.delete(uri, null, null) }
+            throw e
+        }
         return uri
     }
 

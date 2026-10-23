@@ -1,18 +1,15 @@
 package com.cathode.app
 
 import android.app.Application
-import android.app.NotificationChannel
 import android.app.NotificationManager
 import androidx.work.Configuration
-import com.cathode.app.worker.SyncWorker
 
 class CathodeApp : Application(), Configuration.Provider {
     override fun onCreate() {
         super.onCreate()
-        val nm = getSystemService(NotificationManager::class.java)
-        nm.createNotificationChannel(
-            NotificationChannel("cathode_downloads", "Video downloads", NotificationManager.IMPORTANCE_LOW)
-        )
+        // Channel of the never-used Media3 download service (removed in 0.3).
+        getSystemService(NotificationManager::class.java)
+            .deleteNotificationChannel("cathode_downloads")
     }
 
     override val workManagerConfiguration: Configuration

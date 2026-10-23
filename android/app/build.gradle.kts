@@ -15,8 +15,8 @@ android {
         targetSdk = 34
         // CI overrides the code per-build so every main push yields a newer
         // install than the last, without touching this file.
-        versionCode = System.getenv("CATHODE_VERSION_CODE")?.toIntOrNull() ?: 14
-        versionName = System.getenv("CATHODE_VERSION_NAME") ?: "0.2.4"
+        versionCode = System.getenv("CATHODE_VERSION_CODE")?.toIntOrNull() ?: 15
+        versionName = System.getenv("CATHODE_VERSION_NAME") ?: "0.3.0"
     }
 
     buildTypes {
@@ -70,15 +70,12 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
-    implementation("androidx.navigation:navigation-compose:2.7.7")
     implementation("androidx.work:work-runtime-ktx:2.9.0")
     implementation("androidx.datastore:datastore-preferences:1.1.1")
     implementation("androidx.documentfile:documentfile:1.0.1")
     implementation("androidx.media3:media3-exoplayer:1.4.1")
-    implementation("androidx.media3:media3-exoplayer-dash:1.4.1")
     implementation("androidx.media3:media3-ui:1.4.1")
     implementation("androidx.media3:media3-session:1.4.1")
-    implementation("androidx.media3:media3-datasource-okhttp:1.4.1")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     implementation("io.coil-kt:coil-compose:2.6.0")

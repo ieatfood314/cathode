@@ -231,11 +231,12 @@ def test_backfill_filter(monkeypatch):
     monkeypatch.setattr(dl, "resolve_upload_dates",
                         lambda ids: {"old1": "20000101"} if ids else {})
     p = Poller()
-    vids = [{"id": "new1"}, {"id": "old1"}, {"id": "mystery1"}, {"id": "UCnotaVideo"}]
+    channel_entry = "UC" + "c" * 22
+    vids = [{"id": "new1"}, {"id": "old1"}, {"id": "mystery1"}, {"id": channel_entry}]
     kept = p._apply_backfill("UCchan", vids, 30)
     ids = [v["id"] for v in kept]
     assert "new1" in ids and "mystery1" in ids  # in-window + undatable kept
-    assert "old1" not in ids and "UCnotaVideo" not in ids
+    assert "old1" not in ids and channel_entry not in ids
 
 
 def test_cutoff_ymd_format():
@@ -331,29 +332,215 @@ def test_progress_roundtrip():
     assert w == 1
 
 
-def test_prune_beyond_backfill(tmp_path, monkeypatch):
-    """One-time cleanup: downloads older than the backfill window are deleted."""
+def _isolated(tmp_path, monkeypatch):
+    """Point every server path at tmp_path; returns (media_dir, db_path)."""
+    from app.config import settings
+    media = tmp_path / "media"
+    media.mkdir(parents=True, exist_ok=True)
+    (tmp_path / "data").mkdir(exist_ok=True)
+    monkeypatch.setattr(settings, "media_dir", str(media))
+    monkeypatch.setattr(settings, "data_dir", str(tmp_path / "data"))
+    monkeypatch.setattr(settings, "db_path", str(tmp_path / "t.db"))
+    monkeypatch.setattr(settings, "archive_path", str(tmp_path / "data" / "archive.txt"))
+    return media, str(tmp_path / "t.db")
+
+
+def test_backfill_never_deletes(tmp_path, monkeypatch):
+    """Backfill only widens what gets downloaded. It used to double as a
+    retention window, deleting every older upload on every scan."""
     from app import db as dbmod
     from app.config import settings
     from app.poller import Poller
-    media = tmp_path / "media"
+    media, db_path = _isolated(tmp_path, monkeypatch)
     chan = media / "Chan"
-    chan.mkdir(parents=True)
-    (chan / "20110101 - Ancient [anc123XYZ_-].mp4").write_bytes(b"v" * 100)
-    (chan / "20990101 - Fresh [fresh123XYZ-].mp4").write_bytes(b"v" * 100)
-    conn = dbmod.connect(str(tmp_path / "t.db"))
+    chan.mkdir()
+    f = chan / "20110101 - Ancient [anc123XYZ_-].mp4"
+    f.write_bytes(b"v" * 100)
+    conn = dbmod.connect(db_path)
     conn.execute("INSERT INTO videos(id,status,file_path,upload_date) "
                  "VALUES('anc123XYZ_-','done','Chan/20110101 - Ancient [anc123XYZ_-].mp4','20110101')")
-    conn.execute("INSERT INTO videos(id,status,file_path,upload_date) "
-                 "VALUES('fresh123XYZ-','done','Chan/20990101 - Fresh [fresh123XYZ-].mp4','20990101')")
     conn.commit()
-    monkeypatch.setattr(settings, "backfill_days", 5)
-    monkeypatch.setattr(settings, "media_dir", str(media))
-    fixed = Poller()._prune_beyond_backfill(conn, media)
     conn.close()
-    assert fixed == 1
-    assert not chan.exists() or not list(chan.glob("*anc*"))
-    assert (chan / "20990101 - Fresh [fresh123XYZ-].mp4").exists()
+    monkeypatch.setattr(settings, "backfill_days", 5)
+    Poller().scan_once()
+    assert f.exists()
+
+
+def _scan_one(monkeypatch, media, db_path, vid, download_result):
+    import app.poller as pollmod
+    from app import db as dbmod
+    from app.subscriptions import Subscription
+    calls = []
+    monkeypatch.setattr(pollmod, "discover_channel_videos",
+                        lambda url, limit: [{"id": vid, "title": "t"}])
+    monkeypatch.setattr(pollmod, "download_video",
+                        lambda v, *a, **k: (calls.append(v), download_result)[1])
+    conn = dbmod.connect(db_path)
+    pollmod.Poller()._scan_subscription(
+        conn, Subscription("u", channel_id="UC" + "x" * 22), media, media / "archive.txt")
+    conn.close()
+    return calls
+
+
+def test_removed_videos_never_come_back_as_ghosts(tmp_path, monkeypatch):
+    """yt-dlp exits 0 without a file for archived ids; that must not produce a
+    'done' row (it showed in the feed and 404'd on play)."""
+    from fastapi.testclient import TestClient
+    from app import db as dbmod
+    from app.main import app
+    media, db_path = _isolated(tmp_path, monkeypatch)
+    conn = dbmod.connect(db_path)
+    conn.execute("INSERT INTO videos(id,status,file_path) VALUES('pruned00001','pruned','')")
+    conn.commit()
+    conn.close()
+    assert _scan_one(monkeypatch, media, db_path, "pruned00001", (True, "")) == []
+    # A fresh id that yt-dlp skips is recorded as skipped, not done.
+    _scan_one(monkeypatch, media, db_path, "fresh000001", (True, ""))
+    conn = dbmod.connect(db_path)
+    status = conn.execute("SELECT status FROM videos WHERE id='fresh000001'").fetchone()["status"]
+    conn.close()
+    assert status == "skipped"
+    ids = [v["id"] for v in TestClient(app).get("/api/feed").json()["videos"]]
+    assert "pruned00001" not in ids and "fresh000001" not in ids
+
+
+def test_feed_hides_done_rows_without_file(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+    from app import db as dbmod
+    from app.main import app
+    _, db_path = _isolated(tmp_path, monkeypatch)
+    conn = dbmod.connect(db_path)
+    conn.execute("INSERT INTO videos(id,status,file_path) VALUES('nofile00001','done','')")
+    conn.execute("INSERT INTO videos(id,status,file_path) VALUES('hasfile0001','done','a.mp4')")
+    conn.commit()
+    conn.close()
+    ids = [v["id"] for v in TestClient(app).get("/api/feed").json()["videos"]]
+    assert ids == ["hasfile0001"]
+
+
+def test_video_ids_starting_with_uc_download(tmp_path, monkeypatch):
+    media, db_path = _isolated(tmp_path, monkeypatch)
+    assert _scan_one(monkeypatch, media, db_path, "UCq3x7aBcDe", (False, "x")) == ["UCq3x7aBcDe"]
+
+
+def test_bad_upload_keeps_previous_file(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+    from app.main import app
+    _isolated(tmp_path, monkeypatch)
+    data = tmp_path / "data"
+    good_csv = "Channel Id,Channel Url,Channel Title\nUCabc,https://www.youtube.com/channel/UCabc,Good\n"
+    (data / "subscriptions.csv").write_text(good_csv)
+    good_opml = ('<opml><body><outline xmlUrl="https://www.youtube.com/feeds/videos.xml'
+                 '?channel_id=UC1234567890123456789012"/></body></opml>')
+    (data / "subscriptions.opml").write_text(good_opml)
+    c = TestClient(app)
+    assert c.post("/api/subscriptions/upload",
+                  files={"file": ("oops.csv", "not,a,takeout\n1,2,3\n")}).status_code == 400
+    assert c.post("/api/subscriptions/upload",
+                  files={"file": ("oops.opml", "<not xml")}).status_code == 400
+    assert c.post("/api/subscriptions/upload",
+                  files={"file": ("empty.opml", "<opml><body/></opml>")}).status_code == 400
+    assert (data / "subscriptions.csv").read_text() == good_csv
+    assert (data / "subscriptions.opml").read_text() == good_opml
+    assert not list(data.glob("*.upload"))
+
+
+def test_progress_never_unwatches(tmp_path, monkeypatch):
+    """Opening a finished video for a few seconds used to un-mark it."""
+    from fastapi.testclient import TestClient
+    from app import db as dbmod
+    from app.main import app
+    _, db_path = _isolated(tmp_path, monkeypatch)
+    conn = dbmod.connect(db_path)
+    conn.execute("INSERT INTO videos(id,status,file_path,duration,watched,position_seconds) "
+                 "VALUES('seen0000001','done','x.mp4',600,1,600)")
+    conn.commit()
+    conn.close()
+    c = TestClient(app)
+    r = c.post("/api/videos/seen0000001/progress", json={"position_seconds": 3})
+    assert r.json()["watched"] is True
+    assert c.get("/api/videos/seen0000001").json()["watched"] == 1
+    # Explicit unwatch clears it and rewinds.
+    c.post("/api/videos/seen0000001/watched?watched=false")
+    row = c.get("/api/videos/seen0000001").json()
+    assert row["watched"] == 0 and row["position_seconds"] == 0
+
+
+def test_suffix_range(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+    from app import db as dbmod
+    from app.main import app
+    media, db_path = _isolated(tmp_path, monkeypatch)
+    (media / "r.mp4").write_bytes(b"0123456789")
+    conn = dbmod.connect(db_path)
+    conn.execute("INSERT INTO videos(id,status,file_path) VALUES('range000001','done','r.mp4')")
+    conn.commit()
+    conn.close()
+    c = TestClient(app)
+    r = c.get("/api/videos/range000001/stream", headers={"Range": "bytes=-4"})
+    assert r.status_code == 206 and r.content == b"6789"
+    assert r.headers["content-range"] == "bytes 6-9/10"
+    r = c.get("/api/videos/range000001/stream", headers={"Range": "bytes=-50"})
+    assert r.content == b"0123456789"
+    assert c.get("/api/videos/range000001/stream",
+                 headers={"Range": "bytes=-"}).status_code == 416
+
+
+def test_only_one_scan_at_a_time():
+    import threading
+    from app.poller import Poller
+    p = Poller()
+    got = []
+    barrier = threading.Barrier(8)
+
+    def grab():
+        barrier.wait()
+        got.append(p._claim())
+
+    ts = [threading.Thread(target=grab) for _ in range(8)]
+    [t.start() for t in ts]
+    [t.join() for t in ts]
+    assert got.count(True) == 1
+    assert p.scan_async()["started"] is False  # slot still held
+    assert p.scan_once() == {"skipped": "already running"}
+
+
+def test_instant_mode_is_five_minutes(monkeypatch):
+    from app.config import settings
+    from app.poller import Poller
+    monkeypatch.setattr(settings, "poll_mode", "instant")
+    monkeypatch.setattr(settings, "poll_interval_minutes", 30)
+    assert Poller()._interval() == 300
+    monkeypatch.setattr(settings, "poll_mode", "periodic")
+    assert Poller()._interval() == 1800
+
+
+def test_backfill_reuses_known_dates(monkeypatch):
+    import app.downloader as dl
+    from app.poller import Poller
+    asked = []
+    monkeypatch.setattr(dl, "fetch_rss_recent", lambda cid: {})
+    monkeypatch.setattr(dl, "resolve_upload_dates", lambda ids: (asked.extend(ids), {})[1])
+    vids = [{"id": "known000001"}, {"id": "unknown0001"}]
+    Poller()._apply_backfill("UCchan", vids, 30, known={"known000001": "20990101"})
+    assert asked == ["unknown0001"]
+
+
+def test_changing_backfill_retries_skipped(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+    from app import db as dbmod
+    from app.config import settings
+    from app.main import app
+    _, db_path = _isolated(tmp_path, monkeypatch)
+    monkeypatch.setattr(settings, "backfill_days", 5)
+    conn = dbmod.connect(db_path)
+    conn.execute("INSERT INTO videos(id,status) VALUES('skip0000001','skipped')")
+    conn.commit()
+    conn.close()
+    TestClient(app).put("/api/settings", json={"backfill_days": 30})
+    conn = dbmod.connect(db_path)
+    assert conn.execute("SELECT status FROM videos WHERE id='skip0000001'").fetchone()["status"] == "pending"
+    conn.close()
 
 
 def test_strip_cover_streams(tmp_path, monkeypatch):

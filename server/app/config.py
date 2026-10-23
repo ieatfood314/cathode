@@ -19,7 +19,7 @@ class Settings(BaseSettings):
 
     # Polling: how the server discovers new uploads.
     # - periodic: background loop every poll_interval_minutes
-    # - instant: tight loop (poll_interval_minutes clamped to >=5) for near-instant grabs
+    # - instant: every 5 minutes (poll_interval_minutes ignored) for near-instant grabs
     # - on_open: only polls when the app calls POST /api/subscriptions/refresh
     #   (app also triggers this on every cold open; see android SyncWorker)
     poll_mode: str = "periodic"
