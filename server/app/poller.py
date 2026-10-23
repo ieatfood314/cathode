@@ -210,6 +210,11 @@ class Poller:
             vids = discover_channel_videos(url, limit)
             if vids:
                 break
+        # The channel's newest uploads always download; backfill only ever
+        # *adds* older ones within its window. (It used to filter these too,
+        # so a 5-day backfill meant nothing older than 5 days downloaded.)
+        newest = {v["id"] for v in [v for v in vids if is_video_id(v.get("id"))]
+                  [:max(1, settings.max_videos_per_channel_scan)]}
         if backfill > 0 and vids:
             # Dates already known locally never cost another yt-dlp lookup.
             known = {r["id"]: r["upload_date"] for r in conn.execute(
@@ -237,7 +242,8 @@ class Poller:
                 "published": v.get("timestamp") or 0,
             })
             ok, err = download_video(
-                vid, media_dir, archive, dateafter=backfill_dateafter(),
+                vid, media_dir, archive,
+                dateafter=None if vid in newest else backfill_dateafter(),
             )
             if ok:
                 # NOTE: yt-dlp names files "... [id].mp4" — the id is followed
@@ -276,7 +282,7 @@ class Poller:
 
     def _apply_backfill(self, channel_id: str | None, vids: list[dict], days: int,
                         known: dict[str, str] | None = None) -> list[dict]:
-        """Keep only videos dated within the last N days.
+        """Keep the newest few uploads, plus older ones dated within N days.
 
         Flat scans carry no dates, so dates come from the free RSS feed first
         and a single batched yt-dlp call second. Earlier versions KEPT
@@ -291,20 +297,19 @@ class Poller:
         dated: dict[str, str] = dict(known or {})
         if channel_id:
             dated.update(fetch_rss_recent(channel_id))
-        flat_ids = [v.get("id") for v in vids if is_video_id(v.get("id"))]
-        missing = [i for i in flat_ids if i not in dated]
+        videos = [v for v in vids if is_video_id(v.get("id"))]
+        grace = max(1, settings.max_videos_per_channel_scan)
+        newest, older = videos[:grace], videos[grace:]
+        # Only the backlog needs dates (the newest are kept regardless).
+        missing = [v["id"] for v in older if v["id"] not in dated]
         if missing:
             dated.update(resolve_upload_dates(missing))
-        grace = max(1, settings.max_videos_per_channel_scan)
-        kept = []
-        for idx, v in enumerate(vids):
-            vid = v.get("id")
-            if not is_video_id(vid):
-                continue
-            d = dated.get(vid)
-            if d is None and idx >= grace:
+        kept = list(newest)
+        for v in older:
+            d = dated.get(v["id"])
+            if d is None:
                 continue  # undated and not clearly recent — do not download
-            if d is not None and d < cutoff:
+            if d < cutoff:
                 continue  # clearly older than the window
             kept.append(v)
         return kept

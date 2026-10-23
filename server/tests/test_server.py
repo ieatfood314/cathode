@@ -232,11 +232,15 @@ def test_backfill_filter(monkeypatch):
                         lambda ids: {"old1": "20000101"} if ids else {})
     p = Poller()
     channel_entry = "UC" + "c" * 22
-    vids = [{"id": "new1"}, {"id": "old1"}, {"id": "mystery1"}, {"id": channel_entry}]
+    # The newest uploads (first 10) are kept whatever their date; past them,
+    # only in-window dates survive.
+    newest = [{"id": f"latest{i}"} for i in range(10)]
+    vids = newest + [{"id": "new1"}, {"id": "old1"}, {"id": "mystery1"}, {"id": channel_entry}]
     kept = p._apply_backfill("UCchan", vids, 30)
     ids = [v["id"] for v in kept]
-    assert "new1" in ids and "mystery1" in ids  # in-window + undatable kept
-    assert "old1" not in ids and channel_entry not in ids
+    assert all(f"latest{i}" in ids for i in range(10))
+    assert "new1" in ids
+    assert "old1" not in ids and "mystery1" not in ids and channel_entry not in ids
 
 
 def test_cutoff_ymd_format():
@@ -423,6 +427,29 @@ def test_video_ids_starting_with_uc_download(tmp_path, monkeypatch):
     assert _scan_one(monkeypatch, media, db_path, "UCq3x7aBcDe", (False, "x")) == ["UCq3x7aBcDe"]
 
 
+def test_newest_uploads_download_despite_backfill(tmp_path, monkeypatch):
+    """Backfill 5 days must not stop a channel's newest uploads from
+    downloading just because they're 6+ days old."""
+    import app.downloader as dl
+    import app.poller as pollmod
+    from app import db as dbmod
+    from app.config import settings
+    from app.subscriptions import Subscription
+    media, db_path = _isolated(tmp_path, monkeypatch)
+    monkeypatch.setattr(settings, "backfill_days", 5)
+    monkeypatch.setattr(dl, "fetch_rss_recent", lambda cid: {"weekold0001": "20000101"})
+    monkeypatch.setattr(dl, "resolve_upload_dates", lambda ids: {})
+    monkeypatch.setattr(pollmod, "discover_channel_videos", lambda url, limit: [{"id": "weekold0001"}])
+    calls = []
+    monkeypatch.setattr(pollmod, "download_video",
+                        lambda v, *a, dateafter=None, **k: (calls.append((v, dateafter)), (False, "x"))[1])
+    conn = dbmod.connect(db_path)
+    pollmod.Poller()._scan_subscription(
+        conn, Subscription("u", channel_id="UC" + "x" * 22), media, media / "archive.txt")
+    conn.close()
+    assert calls == [("weekold0001", None)]
+
+
 def test_members_only_not_retried(tmp_path, monkeypatch):
     from app import db as dbmod
     media, db_path = _isolated(tmp_path, monkeypatch)
@@ -535,9 +562,10 @@ def test_backfill_reuses_known_dates(monkeypatch):
     asked = []
     monkeypatch.setattr(dl, "fetch_rss_recent", lambda cid: {})
     monkeypatch.setattr(dl, "resolve_upload_dates", lambda ids: (asked.extend(ids), {})[1])
-    vids = [{"id": "known000001"}, {"id": "unknown0001"}]
+    newest = [{"id": f"latest{i:05d}"} for i in range(10)]
+    vids = newest + [{"id": "known000001"}, {"id": "unknown0001"}]
     Poller()._apply_backfill("UCchan", vids, 30, known={"known000001": "20990101"})
-    assert asked == ["unknown0001"]
+    assert asked == ["unknown0001"]  # newest need no dates; known ones aren't re-asked
 
 
 def test_changing_backfill_retries_skipped(tmp_path, monkeypatch):
