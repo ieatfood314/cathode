@@ -423,6 +423,20 @@ def test_video_ids_starting_with_uc_download(tmp_path, monkeypatch):
     assert _scan_one(monkeypatch, media, db_path, "UCq3x7aBcDe", (False, "x")) == ["UCq3x7aBcDe"]
 
 
+def test_members_only_not_retried(tmp_path, monkeypatch):
+    from app import db as dbmod
+    media, db_path = _isolated(tmp_path, monkeypatch)
+    err = "ERROR: [youtube] abc: This video is available to this channel's members on level: X"
+    _scan_one(monkeypatch, media, db_path, "members0001", (False, err))
+    conn = dbmod.connect(db_path)
+    assert conn.execute("SELECT status FROM videos WHERE id='members0001'").fetchone()["status"] == "unavailable"
+    conn.close()
+    assert _scan_one(monkeypatch, media, db_path, "members0001", (False, err)) == []
+    # Transient errors still retry.
+    _scan_one(monkeypatch, media, db_path, "flaky000001", (False, "HTTP Error 403: Forbidden"))
+    assert _scan_one(monkeypatch, media, db_path, "flaky000001", (False, "x")) == ["flaky000001"]
+
+
 def test_bad_upload_keeps_previous_file(tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
     from app.main import app

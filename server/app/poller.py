@@ -31,7 +31,14 @@ from .subscriptions import Subscription, load_subscriptions
 # delete-after-watched) or already found to be un-downloadable by yt-dlp.
 # Retrying them re-ran yt-dlp, which exits 0 without writing anything for
 # archived ids, and the row came back as a playable-looking 'done' with no file.
-SKIP_STATUSES = ("pruned", "deleted", "skipped")
+SKIP_STATUSES = ("pruned", "deleted", "skipped", "unavailable")
+# yt-dlp errors no retry can fix (members-only, paid, private, removed).
+# Retrying them cost a yt-dlp run per video on every scan — every 5 minutes
+# in instant mode.
+PERMANENT_ERRORS = re.compile(
+    r"members-only|available to this channel's members|requires payment|"
+    r"Private video|video has been removed|account associated with this video has been terminated",
+    re.IGNORECASE)
 INSTANT_INTERVAL_MINUTES = 5
 _ID_IN_NAME = re.compile(r"\[([A-Za-z0-9_-]{6,})\]")
 MEDIA_EXTS = (".mp4", ".mkv", ".webm")
@@ -258,6 +265,9 @@ class Poller:
                 down += 1
             else:
                 dbmod.mark_failed(conn, vid, err)
+                if PERMANENT_ERRORS.search(err or ""):
+                    conn.execute("UPDATE videos SET status='unavailable' WHERE id=?", (vid,))
+                    conn.commit()
                 fail += 1
             self._prune(conn, media_dir)
         conn.execute("UPDATE channels SET last_checked=? WHERE id=?", (int(time.time()), channel_id))
