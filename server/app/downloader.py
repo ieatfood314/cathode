@@ -51,15 +51,27 @@ def format_selector(max_res: int) -> str:
     )
 
 
-def backfill_dateafter() -> str | None:
-    """yt-dlp date window matching the configured backfill (None = off).
-
-    yt-dlp's relative date grammar is "now-Ndays" (today/yesterday/now
+def _days_ago(days: int) -> str | None:
+    """yt-dlp's relative date grammar is "now-Ndays" (today/yesterday/now
     minus N day|week|month|year units) — "daysago" is NOT valid and
-    aborts every download.
-    """
-    days = max(0, settings.backfill_days or 0)
+    aborts every download."""
     return f"now-{days}days" if days > 0 else None
+
+
+def keep_dateafter() -> str | None:
+    """yt-dlp date window for a channel's newest uploads: the retention
+    window (None = keep forever). Anything older would be pruned right away."""
+    return _days_ago(max(0, settings.keep_days or 0))
+
+
+def backfill_dateafter() -> str | None:
+    """yt-dlp date window for the older backlog (None = off): the backfill
+    window, narrowed to the retention window when that is shorter."""
+    days = max(0, settings.backfill_days or 0)
+    keep = max(0, settings.keep_days or 0)
+    if days and keep:
+        days = min(days, keep)
+    return _days_ago(days)
 
 
 def build_download_cmd(video_url: str, out_tmpl: str, archive: Path,

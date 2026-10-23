@@ -23,8 +23,8 @@ from pathlib import Path
 
 from . import db as dbmod
 from .config import settings
-from .downloader import (backfill_dateafter, discover_channel_videos,
-                         download_video, resolve_channel_id)
+from .downloader import (backfill_dateafter, cutoff_ymd, discover_channel_videos,
+                         download_video, keep_dateafter, resolve_channel_id)
 from .subscriptions import Subscription, load_subscriptions
 
 # Rows the scan must leave alone: removed on purpose (retention, watched with
@@ -124,6 +124,9 @@ class Poller:
             subs = load_subscriptions(data_dir)
             conn = dbmod.connect(settings.db_path)
             repaired = self._repair_missing_paths(conn, media_dir)
+            # Every scan, not just ones that download something — otherwise a
+            # quiet week never prunes anything.
+            self._prune(conn, media_dir)
             # One-time migration: new downloads never embed cover art, so
             # once every old file has been checked there is nothing left to do.
             scaled = 0
@@ -210,17 +213,19 @@ class Poller:
             vids = discover_channel_videos(url, limit)
             if vids:
                 break
-        # The channel's newest uploads always download; backfill only ever
-        # *adds* older ones within its window. (It used to filter these too,
-        # so a 5-day backfill meant nothing older than 5 days downloaded.)
+        # The channel's newest uploads download unless they're older than the
+        # retention window; backfill only ever *adds* older ones within its
+        # window. (It used to filter these too, so a 5-day backfill meant
+        # nothing older than 5 days downloaded.)
         newest = {v["id"] for v in [v for v in vids if is_video_id(v.get("id"))]
                   [:max(1, settings.max_videos_per_channel_scan)]}
-        if backfill > 0 and vids:
+        keep = max(0, settings.keep_days or 0)
+        if (backfill > 0 or keep > 0) and vids:
             # Dates already known locally never cost another yt-dlp lookup.
             known = {r["id"]: r["upload_date"] for r in conn.execute(
                 "SELECT id, upload_date FROM videos WHERE channel_id=? "
                 "AND upload_date IS NOT NULL AND upload_date != ''", (channel_id,))}
-            vids = self._apply_backfill(channel_id, vids, backfill, known)
+            vids = self._apply_backfill(channel_id, vids, backfill, known, keep)
         disc = down = fail = 0
         for v in vids:
             vid = v.get("id")
@@ -243,7 +248,7 @@ class Poller:
             })
             ok, err = download_video(
                 vid, media_dir, archive,
-                dateafter=None if vid in newest else backfill_dateafter(),
+                dateafter=keep_dateafter() if vid in newest else backfill_dateafter(),
             )
             if ok:
                 # NOTE: yt-dlp names files "... [id].mp4" — the id is followed
@@ -256,7 +261,7 @@ class Poller:
                     # outside --dateafter. Nothing to serve, so never 'done'.
                     conn.execute(
                         "UPDATE videos SET status='skipped', error=? WHERE id=?",
-                        ("yt-dlp skipped it (already archived, or outside the backfill window)",
+                        ("yt-dlp skipped it (already archived, or outside the date window)",
                          vid))
                     conn.commit()
                     continue
@@ -281,8 +286,12 @@ class Poller:
         return (disc, down, fail)
 
     def _apply_backfill(self, channel_id: str | None, vids: list[dict], days: int,
-                        known: dict[str, str] | None = None) -> list[dict]:
+                        known: dict[str, str] | None = None,
+                        keep_days: int = 0) -> list[dict]:
         """Keep the newest few uploads, plus older ones dated within N days.
+        With keep_days set, nothing dated before the retention window is kept
+        at all — it would only be pruned again (a quiet channel's newest 10
+        can go back years).
 
         Flat scans carry no dates, so dates come from the free RSS feed first
         and a single batched yt-dlp call second. Earlier versions KEPT
@@ -292,19 +301,22 @@ class Poller:
         already covers the freshest uploads), so backfill never goes
         beyond its window.
         """
-        from .downloader import cutoff_ymd, fetch_rss_recent, resolve_upload_dates
-        cutoff = cutoff_ymd(days)
+        from .downloader import fetch_rss_recent, resolve_upload_dates
+        keep_cutoff = cutoff_ymd(keep_days) if keep_days > 0 else ""
+        # A later YYYYMMDD is the narrower window.
+        cutoff = max(cutoff_ymd(days), keep_cutoff)
         dated: dict[str, str] = dict(known or {})
         if channel_id:
             dated.update(fetch_rss_recent(channel_id))
         videos = [v for v in vids if is_video_id(v.get("id"))]
         grace = max(1, settings.max_videos_per_channel_scan)
-        newest, older = videos[:grace], videos[grace:]
-        # Only the backlog needs dates (the newest are kept regardless).
+        newest, older = videos[:grace], (videos[grace:] if days > 0 else [])
+        # Only the backlog needs a date lookup. The newest use whatever dates
+        # are free (RSS, the db); undated ones still meet yt-dlp's --dateafter.
         missing = [v["id"] for v in older if v["id"] not in dated]
         if missing:
             dated.update(resolve_upload_dates(missing))
-        kept = list(newest)
+        kept = [v for v in newest if dated.get(v["id"], "99999999") >= keep_cutoff]
         for v in older:
             d = dated.get(v["id"])
             if d is None:
@@ -368,7 +380,11 @@ class Poller:
         conn.commit()
 
     def _prune(self, conn: sqlite3.Connection, media_dir: Path):
-        """Delete media files older than keep_days (0 = keep forever).
+        """Delete media files uploaded more than keep_days ago (0 = keep forever).
+
+        Ages count from the upload date, not the download: a years-old video
+        downloaded today is already past the window. Rows without an upload
+        date fall back to when they were downloaded.
 
         The download-archive entry is intentionally kept, so pruned videos are
         not re-downloaded on the next scan.
@@ -377,9 +393,11 @@ class Poller:
             return
         cutoff = int(time.time()) - settings.keep_days * 86400
         for row in conn.execute(
-                "SELECT id FROM videos WHERE status='done' "
-                "AND downloaded_at < ? AND downloaded_at > 0",
-                (cutoff,)).fetchall():
+                "SELECT id FROM videos WHERE status='done' AND ("
+                " (upload_date IS NOT NULL AND upload_date != '' AND upload_date < ?)"
+                " OR ((upload_date IS NULL OR upload_date = '')"
+                "     AND downloaded_at < ? AND downloaded_at > 0))",
+                (cutoff_ymd(settings.keep_days), cutoff)).fetchall():
             vid = row["id"]
             # YouTube ids are [A-Za-z0-9_-]; safe to glob on.
             for p in media_dir.rglob(f"*{vid}*"):

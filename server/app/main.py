@@ -167,18 +167,18 @@ def put_settings(body: SettingsIn):
         settings.sponsorblock_remove = _clean_sb(body.sponsorblock_remove)
     if body.sponsorblock_mark is not None:
         settings.sponsorblock_mark = _clean_sb(body.sponsorblock_mark)
+    windows = (settings.keep_days, settings.backfill_days)
     if body.keep_days is not None:
         settings.keep_days = max(0, body.keep_days)
     if body.backfill_days is not None:
-        new_backfill = max(0, min(3650, body.backfill_days))
-        if new_backfill != settings.backfill_days:
-            # A different window may now include videos yt-dlp skipped as
-            # out of range: let the next scan try them again.
-            conn = _conn()
-            conn.execute("UPDATE videos SET status='pending' WHERE status='skipped'")
-            conn.commit()
-            conn.close()
-        settings.backfill_days = new_backfill
+        settings.backfill_days = max(0, min(3650, body.backfill_days))
+    if (settings.keep_days, settings.backfill_days) != windows:
+        # A different window may now include videos yt-dlp skipped as
+        # out of range: let the next scan try them again.
+        conn = _conn()
+        conn.execute("UPDATE videos SET status='pending' WHERE status='skipped'")
+        conn.commit()
+        conn.close()
     if body.delete_after_watched is not None:
         settings.delete_after_watched = bool(body.delete_after_watched)
     dbmod.save_settings_snapshot(settings)

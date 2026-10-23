@@ -711,3 +711,83 @@ def test_legacy_db_adopted(tmp_path):
     legacy.write_bytes(b"stale")
     dbmod.adopt_legacy_db(str(target))
     assert legacy.read_bytes() == b"stale"
+
+
+def test_newest_uploads_respect_retention(tmp_path, monkeypatch):
+    """A quiet channel's newest 10 can be years old. With "keep 20 days" they
+    must not download (they used to, and sat in the library for 20 days)."""
+    import app.downloader as dl
+    import app.poller as pollmod
+    from app import db as dbmod
+    from app.config import settings
+    from app.subscriptions import Subscription
+    media, db_path = _isolated(tmp_path, monkeypatch)
+    monkeypatch.setattr(settings, "keep_days", 20)
+    monkeypatch.setattr(settings, "backfill_days", 5)
+    monkeypatch.setattr(dl, "fetch_rss_recent",
+                        lambda cid: {"ancient0001": "20200101", "fresh000001": "20990101"})
+    monkeypatch.setattr(dl, "resolve_upload_dates", lambda ids: {})
+    monkeypatch.setattr(pollmod, "discover_channel_videos", lambda url, limit: [
+        {"id": "fresh000001"}, {"id": "ancient0001"}, {"id": "undated0001"}])
+    calls = []
+    monkeypatch.setattr(pollmod, "download_video",
+                        lambda v, *a, dateafter=None, **k: (calls.append((v, dateafter)), (False, "x"))[1])
+    conn = dbmod.connect(db_path)
+    pollmod.Poller()._scan_subscription(
+        conn, Subscription("u", channel_id="UC" + "x" * 22), media, media / "archive.txt")
+    conn.close()
+    # Undated ones are left to yt-dlp's own date check.
+    assert calls == [("fresh000001", "now-20days"), ("undated0001", "now-20days")]
+
+
+def test_backlog_window_narrowed_by_retention(monkeypatch):
+    from app import config
+    from app.downloader import backfill_dateafter, keep_dateafter
+    monkeypatch.setattr(config.settings, "backfill_days", 30)
+    monkeypatch.setattr(config.settings, "keep_days", 20)
+    assert backfill_dateafter() == "now-20days" and keep_dateafter() == "now-20days"
+    monkeypatch.setattr(config.settings, "keep_days", 0)
+    assert backfill_dateafter() == "now-30days" and keep_dateafter() is None
+
+
+def test_prune_counts_from_upload_date(tmp_path, monkeypatch):
+    """Retention is about how old the video is, not when it was downloaded."""
+    import time
+    from app import db as dbmod
+    from app.config import settings
+    from app.poller import Poller
+    media, db_path = _isolated(tmp_path, monkeypatch)
+    monkeypatch.setattr(settings, "keep_days", 20)
+    now = int(time.time())
+    rows = {"oldupload01": ("20200101", now), "newupload01": ("20990101", now),
+            "nodateold01": ("", now - 30 * 86400), "nodatenew01": ("", now)}
+    conn = dbmod.connect(db_path)
+    for vid, (ud, at) in rows.items():
+        (media / f"x [{vid}].mp4").write_bytes(b"v")
+        conn.execute("INSERT INTO videos(id,status,file_path,upload_date,downloaded_at) "
+                     "VALUES(?,'done',?,?,?)", (vid, f"x [{vid}].mp4", ud, at))
+    conn.commit()
+    Poller()._prune(conn, media)
+    status = {r["id"]: r["status"] for r in conn.execute("SELECT id, status FROM videos")}
+    conn.close()
+    assert status == {"oldupload01": "pruned", "newupload01": "done",
+                      "nodateold01": "pruned", "nodatenew01": "done"}
+    assert not (media / "x [oldupload01].mp4").exists()
+    assert (media / "x [newupload01].mp4").exists()
+
+
+def test_changing_retention_retries_skipped(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+    from app import db as dbmod
+    from app.config import settings
+    from app.main import app
+    _, db_path = _isolated(tmp_path, monkeypatch)
+    monkeypatch.setattr(settings, "keep_days", 20)
+    conn = dbmod.connect(db_path)
+    conn.execute("INSERT INTO videos(id,status) VALUES('skip0000001','skipped')")
+    conn.commit()
+    conn.close()
+    TestClient(app).put("/api/settings", json={"keep_days": 60})
+    conn = dbmod.connect(db_path)
+    assert conn.execute("SELECT status FROM videos WHERE id='skip0000001'").fetchone()["status"] == "pending"
+    conn.close()
