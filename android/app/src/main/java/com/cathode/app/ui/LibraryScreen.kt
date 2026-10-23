@@ -130,6 +130,12 @@ fun LibraryScreen(
                             "library shows up here.",
                         action = "Open Settings", onAction = onOpenSettings,
                     )
+                    // Never synced, and this sync failed: nothing cached to show.
+                    notice != null || wifiBlocked -> EmptyState(
+                        "Nothing synced to this phone yet",
+                        "Your library appears here after the first successful sync.",
+                        action = if (wifiBlocked) null else "Try again", onAction = onRefresh,
+                    )
                     else -> EmptyState(
                         "No videos yet",
                         "Once the server has downloaded something it appears here. " +

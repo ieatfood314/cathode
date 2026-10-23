@@ -48,6 +48,7 @@ import com.cathode.app.data.checkHealth
 import com.cathode.app.data.getServerSettings
 import com.cathode.app.data.putServerSettings
 import com.cathode.app.data.resolveStore
+import com.cathode.app.data.syncFailureMessage
 import com.cathode.app.player.Playback
 import com.cathode.app.player.PlaybackService
 import com.cathode.app.player.StreamCache
@@ -163,8 +164,7 @@ class MainActivity : ComponentActivity() {
                         withContext(Dispatchers.Main) {
                             loading = false
                             syncError = if (result.isSuccess) null
-                            else "Couldn't reach the server — showing your library from the " +
-                                "last sync. Saved videos still play."
+                            else syncFailureMessage(result.exceptionOrNull())
                         }
                         val feed = result.getOrNull()
                         if (feed != null && p.saveOnPhone && p.autoSaveNew) {

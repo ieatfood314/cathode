@@ -73,15 +73,36 @@ fun requireWifiIfEnabled(context: Context, wifiOnly: Boolean) {
 
 class WifiBlockedException(msg: String) : IllegalStateException(msg)
 
-fun fetchFeed(baseUrl: String, unwatchedOnly: Boolean = false): List<Video> {
-    val url = "$baseUrl/api/feed?limit=2000" + if (unwatchedOnly) "&unwatched_only=true" else ""
+fun fetchFeed(baseUrl: String, unwatchedOnly: Boolean = false): List<Video> =
+    try {
+        fetchFeedPage(baseUrl, 2000, unwatchedOnly)
+    } catch (e: HttpStatusException) {
+        // Servers before 0.3 cap limit at 500 and reject anything above (422).
+        if (e.code != 422) throw e
+        fetchFeedPage(baseUrl, 500, unwatchedOnly)
+    }
+
+private fun fetchFeedPage(baseUrl: String, limit: Int, unwatchedOnly: Boolean): List<Video> {
+    val url = "$baseUrl/api/feed?limit=$limit" + if (unwatchedOnly) "&unwatched_only=true" else ""
     baseClient().newCall(Request.Builder().url(url).build()).execute().use { resp ->
-        if (!resp.isSuccessful) throw IllegalStateException("feed HTTP ${resp.code}")
+        if (!resp.isSuccessful) throw HttpStatusException(resp.code, "feed HTTP ${resp.code}")
         return json.decodeFromString(
             FeedResponse.serializer(),
             resp.body?.string().orEmpty().ifEmpty { """{"videos":[]}""" },
         ).videos
     }
+}
+
+/** What to tell the user when a sync failed, by what actually went wrong. */
+fun syncFailureMessage(e: Throwable?): String = when (e) {
+    is OfflineException, is java.io.IOException ->
+        "Couldn't reach the server — showing your library from the last sync. " +
+            "Saved videos still play."
+    is HttpStatusException ->
+        "The server answered with an error (HTTP ${e.code}). If you just updated the " +
+            "app, update the server too."
+    else -> "The server sent something unexpected (${e?.message ?: "unknown error"}). " +
+        "If you just updated the app, update the server too."
 }
 
 /** Tell the server where playback stopped so this video resumes — on this
