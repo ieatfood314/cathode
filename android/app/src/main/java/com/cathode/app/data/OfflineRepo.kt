@@ -7,6 +7,8 @@ import kotlinx.coroutines.flow.update
 import java.util.Collections
 import java.util.concurrent.atomic.AtomicBoolean
 
+private const val PART_MIME = "application/octet-stream"
+
 /** Phone-copy state for one video. */
 sealed interface SaveState {
     data object NotSaved : SaveState
@@ -24,8 +26,6 @@ sealed interface SaveState {
  * moved or renamed by hand are still recognized. All functions block on
  * network/disk: call from Dispatchers.IO.
  */
-private const val PART_MIME = "application/octet-stream"
-
 object OfflineRepo {
     private val _states = MutableStateFlow<Map<String, SaveState>>(emptyMap())
     val states: StateFlow<Map<String, SaveState>> = _states
