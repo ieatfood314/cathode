@@ -15,8 +15,8 @@ android {
         targetSdk = 34
         // CI overrides the code per-build so every main push yields a newer
         // install than the last, without touching this file.
-        versionCode = System.getenv("CATHODE_VERSION_CODE")?.toIntOrNull() ?: 17
-        versionName = System.getenv("CATHODE_VERSION_NAME") ?: "0.3.2"
+        versionCode = System.getenv("CATHODE_VERSION_CODE")?.toIntOrNull() ?: 18
+        versionName = System.getenv("CATHODE_VERSION_NAME") ?: "0.4.0"
     }
 
     buildTypes {

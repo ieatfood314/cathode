@@ -1,42 +1,53 @@
 package com.cathode.app.ui
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 
-/**
- * GlassCard: frosted translucent panel over OLED black. A subtle gradient
- * border + blur behind gives the glass effect without an expensive
- * full-screen blur pass.
- */
+/** Screen title, same size and spacing on every tab. */
 @Composable
-fun GlassCard(
-    modifier: Modifier = Modifier,
-    content: @Composable ColumnScope.() -> Unit,
-) {
-    Box(
-        modifier = modifier
-            .clip(RoundedCornerShape(20.dp))
-            .background(
-                Brush.linearGradient(
-                    listOf(Color(0x33FFFFFF), Color(0x0DFFFFFF), Color(0x1A8B7CFF))
-                )
-            )
-            .padding(1.dp)
-            .clip(RoundedCornerShape(19.dp))
-            .background(Color(0xB3121218))
-            .padding(16.dp)
-    ) {
-        Column { content() }
-    }
+fun ScreenTitle(text: String, modifier: Modifier = Modifier) {
+    Text(text, style = MaterialTheme.typography.headlineSmall, modifier = modifier)
 }
+
+/** Small gray heading above a group of settings or list items. */
+@Composable
+fun SectionLabel(text: String, modifier: Modifier = Modifier) {
+    Text(
+        text, style = MaterialTheme.typography.labelLarge, color = Muted,
+        modifier = modifier.padding(top = 24.dp, bottom = 8.dp),
+    )
+}
+
+/** Flat grouped panel. */
+@Composable
+fun Panel(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+    Column(
+        modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(Surface1)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        content = content,
+    )
+}
+
+/** One line of gray secondary text. */
+@Composable
+fun Hint(text: String, modifier: Modifier = Modifier) {
+    Text(text, style = MaterialTheme.typography.bodySmall, color = Muted, modifier = modifier)
+}
+
+@Composable
+fun Gap(h: Int = 8) = Spacer(Modifier.height(h.dp))

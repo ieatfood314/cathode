@@ -10,20 +10,22 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material3.Button
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -35,6 +37,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import com.cathode.app.data.SubInput
 import com.cathode.app.data.addChannel
@@ -46,15 +49,15 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 private fun originLabel(origin: String) = when (origin) {
-    "opml" -> "Export file"
-    "takeout" -> "Takeout"
-    "manual" -> "Added by you"
-    else -> "Tracked"
+    "opml" -> "OPML import"
+    "takeout" -> "Takeout import"
+    "manual" -> "Added"
+    else -> null
 }
 
 /**
- * Tells you how to point the server at your subscriptions, and lets you
- * manage them by hand: paste a channel link, or upload an export file.
+ * The channels the server follows: add one by link, or import a
+ * subscriptions export (Google Takeout CSV, OPML, or a plain .txt list).
  */
 @Composable
 fun SubscriptionsScreen(serverUrl: String) {
@@ -91,7 +94,7 @@ fun SubscriptionsScreen(serverUrl: String) {
             val msg = try {
                 op()
             } catch (e: Exception) {
-                e.message ?: "Something went wrong — try again."
+                e.message ?: "Failed"
             }
             withContext(Dispatchers.Main) {
                 message = msg
@@ -109,17 +112,29 @@ fun SubscriptionsScreen(serverUrl: String) {
             } ?: "subscriptions.opml"
             val ext = name.substringAfterLast('.', "").lowercase()
             if (ext !in setOf("opml", "xml", "csv", "txt")) {
-                return@runOp "Pick an .opml, .csv, or .txt export file."
+                return@runOp "Use a .csv, .opml or .txt file"
             }
             val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-                ?: return@runOp "Could not read that file."
+                ?: return@runOp "Can't read that file"
             val resp = uploadSubscriptions(serverUrl, "upload.$ext", bytes)
-            if (ext == "txt") "Added ${resp.subscriptions} new channels from that list."
-            else "Uploaded — now tracking ${resp.subscriptions} channels from that file."
+            if (ext == "txt") "Added ${resp.subscriptions} channels"
+            else "Imported ${resp.subscriptions} channels"
         }
     }
 
     LaunchedEffect(serverUrl) { reload() }
+
+    val ready = serverUrl.isNotBlank()
+
+    fun add() {
+        val u = newUrl.trim()
+        if (u.isEmpty()) return
+        newUrl = ""
+        runOp("add") {
+            val r = addChannel(serverUrl, u)
+            if (r.added) "Added" else "Already added"
+        }
+    }
 
     Column(
         Modifier
@@ -128,100 +143,70 @@ fun SubscriptionsScreen(serverUrl: String) {
             .verticalScroll(rememberScrollState())
             .padding(16.dp)
     ) {
-        Text("Channels", style = MaterialTheme.typography.headlineMedium)
-        Spacer(Modifier.height(12.dp))
+        ScreenTitle("Channels")
+        Gap(16)
 
-        if (serverUrl.isBlank()) {
-            GlassCard(Modifier.fillMaxWidth()) {
-                Text("Set your server URL first", color = AccentTeal)
-                Text(
-                    "The buttons below wake up once the app knows where your server is — " +
-                        "enter it in Settings, then come back here.",
-                    style = MaterialTheme.typography.bodySmall,
-                )
+        if (!ready) {
+            Hint("Set a server address in Settings first.")
+            Gap(16)
+        }
+
+        OutlinedTextField(
+            value = newUrl,
+            onValueChange = { newUrl = it },
+            placeholder = { Text("Channel link or @handle") },
+            singleLine = true,
+            enabled = ready,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+            keyboardActions = KeyboardActions(onDone = { add() }),
+            trailingIcon = {
+                IconButton(onClick = { add() }, enabled = !busy && ready && newUrl.isNotBlank()) {
+                    Icon(Icons.Default.Add, contentDescription = "Add channel")
+                }
+            },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TextButton(onClick = { picker.launch("*/*") }, enabled = !busy && ready) {
+                Text("Import file")
             }
-            Spacer(Modifier.height(12.dp))
-        }
-
-        GlassCard(Modifier.fillMaxWidth()) {
-            Text("How to add everything at once")
-            Text(
-                "1. On a computer, open Google Takeout and export YouTube → subscriptions.\n" +
-                    "2. You'll get subscriptions.csv (an .opml export from another app works too).\n" +
-                    "3. Upload it below — the server starts tracking every channel.\n" +
-                    "A new .csv or .opml replaces the last one of that kind; a .txt list " +
-                    "adds to what's there.",
-                style = MaterialTheme.typography.bodySmall, color = Color.Gray,
-            )
-            Spacer(Modifier.height(8.dp))
-            OutlinedButton(onClick = { picker.launch("*/*") }, enabled = !busy && serverUrl.isNotBlank()) {
-                Text("Upload subscriptions file")
+            if (busy) {
+                CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+            } else if (message != null) {
+                Hint(message!!)
             }
         }
-        Spacer(Modifier.height(12.dp))
+        // A new .csv or .opml replaces the previous import of that kind; a
+        // .txt list adds to what's there.
+        Hint("Google Takeout CSV or OPML replaces the last import. TXT adds.",
+            Modifier.padding(start = 12.dp))
 
-        GlassCard(Modifier.fillMaxWidth()) {
-            Text("Add one channel")
-            OutlinedTextField(
-                value = newUrl,
-                onValueChange = { newUrl = it },
-                label = { Text("Any link, @handle, or ID") },
-                placeholder = { Text("https://www.youtube.com/@example") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Spacer(Modifier.height(8.dp))
-            Button(
-                onClick = {
-                    val u = newUrl.trim()
-                    if (u.isNotEmpty()) {
-                        newUrl = ""
-                        runOp("add") {
-                            val r = addChannel(serverUrl, u)
-                            if (r.added) "Now tracking ${r.url}" else "Already tracking that channel."
-                        }
-                    }
-                },
-                enabled = !busy && serverUrl.isNotBlank(),
-            ) { Text("Track channel") }
-        }
-        Spacer(Modifier.height(12.dp))
-
-        if (message != null) {
-            Text(message!!, style = MaterialTheme.typography.bodySmall, color = AccentTeal)
-            Spacer(Modifier.height(8.dp))
-        }
-
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-            Text("Tracked (${inputs.size})", style = MaterialTheme.typography.titleMedium)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            SectionLabel(if (inputs.isEmpty()) "Following" else "Following · ${inputs.size}")
             Spacer(Modifier.weight(1f))
-            if (loading) CircularProgressIndicator(strokeWidth = 2.dp)
+            if (loading) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
         }
-        Spacer(Modifier.height(8.dp))
+        if (inputs.isEmpty() && !loading) Hint("No channels yet.")
         for (s in inputs) {
-            GlassCard(Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text(s.title ?: titles[s.sourceUrl] ?: s.channelId ?: s.sourceUrl,
-                            style = MaterialTheme.typography.titleSmall)
-                        Text(originLabel(s.origin),
-                            style = MaterialTheme.typography.bodySmall, color = Color.Gray)
-                    }
-                    if (s.origin == "manual") {
-                        IconButton(
-                            onClick = { runOp("remove") { removeChannel(serverUrl, s.sourceUrl); "Stopped tracking" } },
-                            enabled = !busy,
-                        ) {
-                            Icon(Icons.Default.Delete, contentDescription = "Stop tracking")
-                        }
+            Row(
+                Modifier.fillMaxWidth().heightIn(min = 56.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(s.title ?: titles[s.sourceUrl] ?: s.channelId ?: s.sourceUrl)
+                    originLabel(s.origin)?.let { Hint(it) }
+                }
+                // Imported channels come and go with their file.
+                if (s.origin == "manual") {
+                    IconButton(
+                        onClick = { runOp("remove") { removeChannel(serverUrl, s.sourceUrl); "Removed" } },
+                        enabled = !busy,
+                    ) {
+                        Icon(Icons.Default.Close, contentDescription = "Remove", tint = Muted)
                     }
                 }
             }
         }
-        if (inputs.isEmpty() && !loading) {
-            Text("Nothing tracked yet — upload an export or add a channel above.",
-                style = MaterialTheme.typography.bodySmall, color = Color.Gray)
-        }
-        Spacer(Modifier.height(24.dp))
+        Gap(16)
     }
 }

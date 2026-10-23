@@ -1,27 +1,28 @@
 package com.cathode.app.ui
 
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 
-// OLED black foundation: true #000 backgrounds (pixels off), glass cards float above.
+// OLED black (pixels off), one accent, gray for everything secondary.
 val OledBlack = Color(0xFF000000)
-val OledSurface = Color(0xFF0A0A0F)
-val GlassWhite10 = Color(0x1AFFFFFF)
-val GlassWhite16 = Color(0x29FFFFFF)
-val AccentViolet = Color(0xFF8B7CFF)
-val AccentTeal = Color(0xFF5EEAD4)
+val Surface1 = Color(0xFF111114)
+val Muted = Color(0xFF8E8E96)
+val Accent = Color(0xFF8B7CFF)
 
 private val Scheme = darkColorScheme(
     background = OledBlack,
-    surface = OledSurface,
-    surfaceVariant = Color(0xFF14141B),
-    primary = AccentViolet,
-    secondary = AccentTeal,
+    surface = OledBlack,
+    surfaceVariant = Surface1,
+    surfaceContainer = Surface1,
+    surfaceContainerHigh = Color(0xFF1A1A1F),
+    primary = Accent,
+    secondary = Accent,
     onBackground = Color.White,
     onSurface = Color.White,
+    onSurfaceVariant = Muted,
+    outlineVariant = Color(0xFF222228),
 )
 
 @Composable

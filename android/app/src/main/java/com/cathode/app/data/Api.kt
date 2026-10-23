@@ -67,7 +67,7 @@ data class UploadResponse(val file: String = "", val subscriptions: Int = 0)
 
 fun requireWifiIfEnabled(context: Context, wifiOnly: Boolean) {
     if (wifiOnly && !isUnmetered(context)) {
-        throw WifiBlockedException("Not on unmetered Wi-Fi — sync paused (Wi-Fi only is ON).")
+        throw WifiBlockedException("Waiting for Wi-Fi")
     }
 }
 
@@ -95,14 +95,11 @@ private fun fetchFeedPage(baseUrl: String, limit: Int, unwatchedOnly: Boolean): 
 
 /** What to tell the user when a sync failed, by what actually went wrong. */
 fun syncFailureMessage(e: Throwable?): String = when (e) {
-    is OfflineException, is java.io.IOException ->
-        "Couldn't reach the server — showing your library from the last sync. " +
-            "Saved videos still play."
-    is HttpStatusException ->
-        "The server answered with an error (HTTP ${e.code}). If you just updated the " +
-            "app, update the server too."
-    else -> "The server sent something unexpected (${e?.message ?: "unknown error"}). " +
-        "If you just updated the app, update the server too."
+    // Offline or unreachable: the library shown is the last synced one.
+    is OfflineException, is java.io.IOException -> "Can't reach server"
+    // Usually an app/server version mismatch.
+    is HttpStatusException -> "Server error ${e.code}. Is the server up to date?"
+    else -> "Unexpected server response. Is the server up to date?"
 }
 
 /** Tell the server where playback stopped so this video resumes — on this

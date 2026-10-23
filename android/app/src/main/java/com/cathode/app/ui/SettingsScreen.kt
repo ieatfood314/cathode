@@ -3,22 +3,25 @@ package com.cathode.app.ui
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -36,25 +39,26 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import com.cathode.app.data.AppPrefs
 import com.cathode.app.data.ServerSettings
 import com.cathode.app.data.VideoStore
 import kotlinx.coroutines.delay
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 /** Retention steps: every day up to a month, then 60 / 90 / 180 / 360. */
 val RETENTION_OPTIONS: List<Int> = listOf(0) + (1..30).toList() + listOf(60, 90, 180, 360)
 
 fun retentionLabel(days: Int): String = when {
-    days <= 0 -> "Keep forever"
-    days == 1 -> "Keep 1 day"
-    days < 30 -> "Keep $days days"
-    days < 60 -> "Keep about a month"
-    days < 90 -> "Keep about 2 months"
-    days < 180 -> "Keep about 3 months"
-    days < 360 -> "Keep about 6 months"
-    else -> "Keep about a year"
+    days <= 0 -> "Forever"
+    days == 1 -> "1 day"
+    days <= 30 -> "$days days"
+    days < 90 -> "2 months"
+    days < 180 -> "3 months"
+    days < 360 -> "6 months"
+    else -> "1 year"
 }
 
 /** Real video heights (the old free slider landed on 660p, 1260p…). */
@@ -68,9 +72,12 @@ fun resolutionLabel(h: Int): String = when (h) {
 
 fun intervalLabel(mins: Int): String = when {
     mins < 60 -> "$mins min"
-    mins % 60 == 0 -> if (mins == 60) "hour" else "${mins / 60} hours"
+    mins % 60 == 0 -> if (mins == 60) "1 hour" else "${mins / 60} hours"
     else -> "${mins / 60} h ${mins % 60} min"
 }
+
+private fun nearestIndex(options: List<Int>, value: Int) =
+    options.indices.minByOrNull { abs(options[it] - value) } ?: 0
 
 /** SponsorBlock categories: id + short button label. */
 val SB_CATS = listOf(
@@ -135,58 +142,36 @@ fun SettingsScreen(
             .verticalScroll(rememberScrollState())
             .padding(16.dp)
     ) {
-        Text("Settings", style = MaterialTheme.typography.headlineMedium)
-        Spacer(Modifier.height(12.dp))
+        ScreenTitle("Settings")
 
-        GlassCard(Modifier.fillMaxWidth()) {
-            Text("Server")
+        SectionLabel("Connection")
+        Panel {
             ServerUrlField(prefs.serverUrl) { url -> onPrefs { it.copy(serverUrl = url) } }
-            Text(
-                "On home Wi-Fi use http://<server>:8000; away from home use your " +
-                    "Tailscale https URL. Either way, sync still obeys Wi-Fi only below.",
-                style = MaterialTheme.typography.bodySmall, color = Color.Gray,
-            )
-            Spacer(Modifier.height(8.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                OutlinedButton(onClick = onTestConnection, enabled = !testing) {
-                    Text("Test connection")
+                TextButton(onClick = onTestConnection, enabled = !testing && prefs.serverUrl.isNotBlank()) {
+                    Text("Test")
                 }
                 if (testing) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.padding(start = 12.dp),
-                        strokeWidth = 2.dp,
-                    )
+                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                } else if (connStatus != null) {
+                    Hint(connStatus)
                 }
             }
-            if (connStatus != null) {
-                Text(connStatus, style = MaterialTheme.typography.bodySmall, color = AccentTeal)
+            RowDivider()
+            SwitchRow("Wi-Fi only", "Never use mobile data", prefs.wifiOnly) { on ->
+                onPrefs { it.copy(wifiOnly = on) }
             }
         }
-        Spacer(Modifier.height(12.dp))
 
-        GlassCard(Modifier.fillMaxWidth()) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("Wi-Fi only")
-                    Text(
-                        "Never use cellular data. Sync + downloads wait for unmetered Wi-Fi " +
-                            "(Tailscale over Wi-Fi is fine; Tailscale over cellular stays paused).",
-                        style = MaterialTheme.typography.bodySmall, color = Color.Gray,
-                    )
-                }
-                Switch(checked = prefs.wifiOnly, onCheckedChange = { on -> onPrefs { it.copy(wifiOnly = on) } })
+        SectionLabel("This phone")
+        Panel {
+            SwitchRow("Save videos", "Keep copies for offline playback", prefs.saveOnPhone) { on ->
+                onPrefs { it.copy(saveOnPhone = on) }
             }
-        }
-        Spacer(Modifier.height(12.dp))
-
-        GlassCard(Modifier.fillMaxWidth()) {
-            Text("On this phone")
-            SwitchRow("Save videos on this phone",
-                "Keep offline copies so anything plays with no network at all.",
-                prefs.saveOnPhone) { on -> onPrefs { it.copy(saveOnPhone = on) } }
-            SwitchRow("Save new videos automatically",
-                "After each sync, new arrivals are saved in the background.",
-                prefs.autoSaveNew) { on -> onPrefs { it.copy(autoSaveNew = on) } }
+            SwitchRow("Save new videos automatically", null, prefs.autoSaveNew, enabled = prefs.saveOnPhone) { on ->
+                onPrefs { it.copy(autoSaveNew = on) }
+            }
+            RowDivider()
             AfterWatchingRow(
                 phone = prefs.deleteAfterWatched,
                 server = server?.deleteAfterWatched,
@@ -200,6 +185,7 @@ fun SettingsScreen(
                     }
                 },
             )
+            RowDivider()
             StorageFolderRow(
                 storageLabel = storageLabel,
                 isCustom = prefs.storageUri.isNotBlank(),
@@ -207,100 +193,104 @@ fun SettingsScreen(
                 onReset = { onPrefs { it.copy(storageUri = "") } },
             )
             if (savedSummary != null) {
-                Text(savedSummary, style = MaterialTheme.typography.bodySmall, color = Color.Gray)
-            }
-            if (savedCount > 0) {
-                var confirmClear by remember { mutableStateOf(false) }
-                OutlinedButton(onClick = { confirmClear = true }) { Text("Clear saved videos") }
-                if (confirmClear) {
-                    AlertDialog(
-                        onDismissRequest = { confirmClear = false },
-                        title = { Text("Delete all saved videos?") },
-                        text = {
-                            Text("Removes $savedCount videos from this phone. They stay on " +
-                                "your server and can be saved again.")
-                        },
-                        confirmButton = {
-                            TextButton(onClick = { confirmClear = false; onClearSaved() }) { Text("Delete") }
-                        },
-                        dismissButton = {
-                            TextButton(onClick = { confirmClear = false }) { Text("Cancel") }
-                        },
-                    )
-                }
+                RowDivider()
+                StorageRow(savedSummary, savedCount, onClearSaved)
             }
         }
-        Spacer(Modifier.height(12.dp))
 
-        Text("Server config", style = MaterialTheme.typography.titleMedium)
-        if (serverStatus != null) {
-            Text(serverStatus, style = MaterialTheme.typography.bodySmall, color = AccentTeal)
+        Row(verticalAlignment = Alignment.Bottom) {
+            SectionLabel("Server")
+            Spacer(Modifier.weight(1f))
+            if (serverStatus != null) Hint(serverStatus, Modifier.padding(bottom = 8.dp))
         }
-        Spacer(Modifier.height(8.dp))
-        if (serverLoading && server == null) {
-            CircularProgressIndicator()
-        } else if (server != null) {
-            PollingCard(server, onServer)
-            Spacer(Modifier.height(12.dp))
-            GlassCard(Modifier.fillMaxWidth()) {
-                Text("Download quality")
-                val idx = RESOLUTION_OPTIONS.indices
-                    .minByOrNull { kotlin.math.abs(RESOLUTION_OPTIONS[it] - server.maxResolution) } ?: 3
-                Text("Up to ${resolutionLabel(RESOLUTION_OPTIONS[idx])}")
-                Slider(
-                    value = idx.toFloat(),
-                    onValueChange = {
-                        val h = RESOLUTION_OPTIONS[it.roundToInt().coerceIn(RESOLUTION_OPTIONS.indices)]
-                        if (h != server.maxResolution) onServer(server.copy(maxResolution = h))
-                    },
-                    valueRange = 0f..(RESOLUTION_OPTIONS.size - 1).toFloat(),
-                    steps = RESOLUTION_OPTIONS.size - 2,
-                )
-            }
-            Spacer(Modifier.height(12.dp))
-            GlassCard(Modifier.fillMaxWidth()) {
-                Text("What to cut out")
-                Text("These segments are removed from new downloads. Pick none to keep everything.",
-                    style = MaterialTheme.typography.bodySmall, color = Color.Gray)
-                ChipGrid(
-                    cats = SB_CATS.filter { it.first != "poi_highlight" },
-                    selected = splitSb(server.sponsorblockRemove),
-                    onToggle = { onServer(toggleRemove(server, it)) },
-                )
-            }
-            Spacer(Modifier.height(12.dp))
-            GlassCard(Modifier.fillMaxWidth()) {
-                Text("What to chapter-mark")
-                Text("Kept in the video, skippable from the player.",
-                    style = MaterialTheme.typography.bodySmall, color = Color.Gray)
-                ChipGrid(
-                    cats = SB_CATS,
-                    selected = if (server.sponsorblockMark == "all") SB_ALL.toSet()
-                    else splitSb(server.sponsorblockMark),
-                    onToggle = { onServer(toggleMark(server, it)) },
-                )
-            }
-            Spacer(Modifier.height(12.dp))
-            GlassCard(Modifier.fillMaxWidth()) {
-                Text("Retention")
-                Text(retentionLabel(server.keepDays))
-                Text("The server deletes its downloads this long after they arrive.",
-                    style = MaterialTheme.typography.bodySmall, color = Color.Gray)
-                RetentionSlider(server.keepDays) { onServer(server.copy(keepDays = it)) }
-                Text("Backfill recent videos")
-                Text("Also grab the backlog from the last N days per channel — not just the " +
-                    "newest uploads. Only adds downloads; never deletes any.",
-                    style = MaterialTheme.typography.bodySmall, color = Color.Gray)
-                BackfillRow(server.backfillDays) { onServer(server.copy(backfillDays = it)) }
-            }
-        } else {
-            GlassCard(Modifier.fillMaxWidth()) {
-                Text("Enter the server URL above and test the connection to edit server settings here.")
-            }
+        when {
+            server != null -> ServerPanels(server, onServer)
+            serverLoading -> CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
+            else -> Hint("Connect to a server to change these.")
         }
-        Spacer(Modifier.height(24.dp))
     }
 }
+
+@Composable
+private fun ServerPanels(server: ServerSettings, onServer: (ServerSettings) -> Unit) {
+    Panel {
+        Text("Check for new videos")
+        Gap(4)
+        RadioRow("When the app opens", server.pollMode == "on_open") {
+            onServer(server.copy(pollMode = "on_open"))
+        }
+        RadioRow("On a schedule", server.pollMode == "periodic") {
+            onServer(server.copy(pollMode = "periodic"))
+        }
+        RadioRow("Every 5 minutes", server.pollMode == "instant") {
+            onServer(server.copy(pollMode = "instant"))
+        }
+        if (server.pollMode == "periodic") {
+            // Local while dragging; one save when you let go.
+            var drag by remember(server.pollIntervalMinutes) {
+                mutableFloatStateOf(server.pollIntervalMinutes.toFloat())
+            }
+            Gap(4)
+            ValueLabel("Every", intervalLabel(drag.toInt()))
+            Slider(
+                value = drag,
+                onValueChange = { drag = ((it / 5f).roundToInt() * 5).coerceIn(5, 720).toFloat() },
+                onValueChangeFinished = {
+                    if (drag.toInt() != server.pollIntervalMinutes) {
+                        onServer(server.copy(pollIntervalMinutes = drag.toInt()))
+                    }
+                },
+                valueRange = 5f..720f,
+            )
+        }
+        RowDivider()
+        val resIdx = nearestIndex(RESOLUTION_OPTIONS, server.maxResolution)
+        ValueLabel("Max quality", resolutionLabel(RESOLUTION_OPTIONS[resIdx]))
+        StepSlider(RESOLUTION_OPTIONS, resIdx) { h ->
+            if (h != server.maxResolution) onServer(server.copy(maxResolution = h))
+        }
+        RowDivider()
+        // Snap any legacy value (e.g. from the old linear slider) to the nearest step.
+        val keepIdx = nearestIndex(RETENTION_OPTIONS, server.keepDays)
+        ValueLabel("Keep downloads", retentionLabel(RETENTION_OPTIONS[keepIdx]))
+        StepSlider(RETENTION_OPTIONS, keepIdx) { d ->
+            if (d != server.keepDays) onServer(server.copy(keepDays = d))
+        }
+        RowDivider()
+        Text("Backfill")
+        Hint("Also fetch older uploads from each channel")
+        Gap()
+        ChipGrid(
+            cats = BACKFILL_OPTIONS.map { (d, label) -> d.toString() to label },
+            selected = setOf(server.backfillDays.toString()),
+            onToggle = { onServer(server.copy(backfillDays = it.toInt())) },
+        )
+        Gap(4)
+    }
+
+    SectionLabel("SponsorBlock")
+    Panel {
+        Text("Remove")
+        Gap()
+        ChipGrid(
+            cats = SB_CATS.filter { it.first != "poi_highlight" },
+            selected = splitSb(server.sponsorblockRemove),
+            onToggle = { onServer(toggleRemove(server, it)) },
+        )
+        RowDivider()
+        Text("Mark as chapters")
+        Gap()
+        ChipGrid(
+            cats = SB_CATS,
+            selected = if (server.sponsorblockMark == "all") SB_ALL.toSet()
+            else splitSb(server.sponsorblockMark),
+            onToggle = { onServer(toggleMark(server, it)) },
+        )
+        Gap(4)
+    }
+}
+
+private val BACKFILL_OPTIONS = listOf(0 to "Off", 5 to "5 days", 7 to "7 days", 30 to "30 days", 90 to "90 days")
 
 /**
  * The field owns its text while you type. Saving every keystroke started a
@@ -327,59 +317,22 @@ private fun ServerUrlField(stored: String, onCommit: (String) -> Unit) {
             urlText = it
             urlEdited = true
         },
-        label = { Text("Server URL") },
+        label = { Text("Server address") },
         placeholder = { Text("http://192.168.1.10:8000") },
         singleLine = true,
         modifier = Modifier.fillMaxWidth(),
     )
 }
 
-@Composable
-private fun PollingCard(server: ServerSettings, onServer: (ServerSettings) -> Unit) {
-    GlassCard(Modifier.fillMaxWidth()) {
-        Text("How the server checks for new videos")
-        PollModeRow("Only when the app opens", "on_open", server.pollMode) {
-            onServer(server.copy(pollMode = it))
-        }
-        PollModeRow("On a schedule", "periodic", server.pollMode) {
-            onServer(server.copy(pollMode = it))
-        }
-        PollModeRow("Every 5 minutes — the moment they drop", "instant", server.pollMode) {
-            onServer(server.copy(pollMode = it))
-        }
-        if (server.pollMode == "periodic") {
-            // Local while dragging; one save when you let go.
-            var drag by remember(server.pollIntervalMinutes) {
-                mutableFloatStateOf(server.pollIntervalMinutes.toFloat())
-            }
-            Text("Check every ${intervalLabel(drag.toInt())}")
-            Slider(
-                value = drag,
-                onValueChange = { drag = ((it / 5f).roundToInt() * 5).coerceIn(5, 720).toFloat() },
-                onValueChangeFinished = {
-                    if (drag.toInt() != server.pollIntervalMinutes) {
-                        onServer(server.copy(pollIntervalMinutes = drag.toInt()))
-                    }
-                },
-                valueRange = 5f..720f,
-            )
-        }
-        Text(
-            "Opening the app always triggers a check too. The phone's own background " +
-                "sync runs at most every 15 min (Android limit).",
-            style = MaterialTheme.typography.bodySmall, color = Color.Gray,
-        )
-    }
-}
-
 enum class AfterWatching(val label: String) {
-    KEEP("Keep it"), PHONE("Delete the phone copy"), EVERYWHERE("Delete from phone and server")
+    KEEP("Keep"), PHONE("Delete from phone"), EVERYWHERE("Delete from phone and server")
 }
 
 /**
  * One choice for what happens to a watched video. It used to be two
  * switches on two cards (phone, server), and it wasn't obvious that the
- * phone one is what frees phone storage.
+ * phone one is what frees phone storage. The phone copy goes when the
+ * player closes, never mid-play.
  */
 @Composable
 private fun AfterWatchingRow(phone: Boolean, server: Boolean?, onPick: (AfterWatching) -> Unit) {
@@ -388,34 +341,12 @@ private fun AfterWatchingRow(phone: Boolean, server: Boolean?, onPick: (AfterWat
         phone -> AfterWatching.PHONE
         else -> AfterWatching.KEEP
     }
-    Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-        Text("After watching")
-        Text(
-            when (current) {
-                AfterWatching.KEEP -> "Watched videos stay on this phone and the server."
-                AfterWatching.PHONE -> "The phone copy is deleted when you close a watched " +
-                    "video (never mid-play). The server keeps it, so you can save it again."
-                AfterWatching.EVERYWHERE -> "Deleted from this phone when you close it, and " +
-                    "from the server as soon as it's watched. Gone for good."
-            },
-            style = MaterialTheme.typography.bodySmall, color = Color.Gray,
-        )
-        for (mode in AfterWatching.entries) {
-            // The server half can only change while the server is reachable.
-            val enabled = server != null || mode != AfterWatching.EVERYWHERE
-            Row(
-                Modifier.fillMaxWidth().padding(vertical = 2.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                androidx.compose.material3.RadioButton(
-                    selected = mode == current, onClick = { onPick(mode) }, enabled = enabled,
-                )
-                Text(
-                    mode.label, modifier = Modifier.padding(start = 8.dp),
-                    color = if (enabled) Color.Unspecified else Color.Gray,
-                )
-            }
-        }
+    Text("After watching")
+    Gap(4)
+    for (mode in AfterWatching.entries) {
+        // The server half can only change while the server is reachable.
+        val enabled = server != null || mode != AfterWatching.EVERYWHERE
+        RadioRow(mode.label, mode == current, enabled) { onPick(mode) }
     }
 }
 
@@ -433,91 +364,99 @@ private fun StorageFolderRow(
             onPick(uri.toString())
         }
     }
-    Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-        Text("Storage folder")
-        Text(
-            "Videos are saved as plain .mp4 files in $storageLabel — visible in any file manager, never app data.",
-            style = MaterialTheme.typography.bodySmall, color = Color.Gray,
-        )
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            OutlinedButton(onClick = { picker.launch(null) }) { Text("Choose folder") }
-            if (isCustom) {
-                OutlinedButton(onClick = onReset, modifier = Modifier.padding(start = 8.dp)) {
-                    Text("Use default")
-                }
-            }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text("Folder")
+            Hint(storageLabel)
         }
-        Text(
-            "Pick internal storage, an SD card, or a USB drive.",
-            style = MaterialTheme.typography.bodySmall, color = Color.Gray,
+        if (isCustom) TextButton(onClick = onReset) { Text("Reset") }
+        TextButton(onClick = { picker.launch(null) }) { Text("Change") }
+    }
+}
+
+@Composable
+private fun StorageRow(summary: String, savedCount: Int, onClear: () -> Unit) {
+    var confirm by remember { mutableStateOf(false) }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text("Storage")
+            Hint(summary)
+        }
+        if (savedCount > 0) TextButton(onClick = { confirm = true }) { Text("Clear") }
+    }
+    if (confirm) {
+        AlertDialog(
+            onDismissRequest = { confirm = false },
+            title = { Text("Delete saved videos?") },
+            text = { Text("$savedCount videos will be removed from this phone. They stay on the server.") },
+            confirmButton = {
+                TextButton(onClick = { confirm = false; onClear() }) { Text("Delete") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirm = false }) { Text("Cancel") }
+            },
         )
     }
 }
 
 @Composable
-private fun RetentionSlider(days: Int, onPick: (Int) -> Unit) {
-    // Snap any legacy value (e.g. from the old linear slider) to the nearest step.
-    val idx = RETENTION_OPTIONS.indices.minByOrNull { kotlin.math.abs(RETENTION_OPTIONS[it] - days) } ?: 0
+private fun RowDivider() = HorizontalDivider(
+    Modifier.padding(vertical = 12.dp), color = MaterialTheme.colorScheme.outlineVariant,
+)
+
+/** Label on the left, current value on the right (above a slider). */
+@Composable
+private fun ValueLabel(label: String, value: String) {
+    Row(Modifier.fillMaxWidth()) {
+        Text(label, Modifier.weight(1f))
+        Text(value, color = Muted)
+    }
+}
+
+@Composable
+private fun StepSlider(options: List<Int>, index: Int, onPick: (Int) -> Unit) {
     Slider(
-        value = idx.toFloat(),
-        onValueChange = {
-            val d = RETENTION_OPTIONS[it.roundToInt().coerceIn(RETENTION_OPTIONS.indices)]
-            if (d != days) onPick(d)
-        },
-        valueRange = 0f..(RETENTION_OPTIONS.size - 1).toFloat(),
-        steps = RETENTION_OPTIONS.size - 2,
+        value = index.toFloat(),
+        onValueChange = { onPick(options[it.roundToInt().coerceIn(options.indices)]) },
+        valueRange = 0f..(options.size - 1).toFloat(),
+        steps = options.size - 2,
     )
 }
 
 @Composable
-private fun BackfillRow(selected: Int, onPick: (Int) -> Unit) {
-    val options = listOf(0 to "Off", 5 to "5 days", 7 to "7 days", 30 to "30 days", 90 to "90 days")
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        for (row in options.chunked(3)) {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                for ((days, label) in row) {
-                    FilterChip(
-                        selected = selected == days,
-                        onClick = { onPick(days) },
-                        label = { Text(label, maxLines = 1) },
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-                repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
-            }
-        }
-    }
-}
-
-@Composable
-private fun SwitchRow(label: String, desc: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+private fun SwitchRow(
+    label: String,
+    desc: String?,
+    checked: Boolean,
+    enabled: Boolean = true,
+    onChange: (Boolean) -> Unit,
+) {
     Row(
         Modifier
             .fillMaxWidth()
-            .padding(vertical = 4.dp),
+            .clickable(enabled = enabled, role = Role.Switch) { onChange(!checked) }
+            .padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
-            Text(label)
-            Text(desc, style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+            Text(label, color = if (enabled) Color.Unspecified else Muted)
+            if (desc != null) Hint(desc)
         }
-        Switch(checked = checked, onCheckedChange = onChange)
+        Switch(checked = checked, onCheckedChange = null, enabled = enabled)
     }
 }
 
 @Composable
-private fun PollModeRow(label: String, value: String, selected: String, onPick: (String) -> Unit) {
+private fun RadioRow(label: String, selected: Boolean, enabled: Boolean = true, onPick: () -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()
-            .padding(vertical = 4.dp),
+            .selectable(selected = selected, enabled = enabled, role = Role.RadioButton, onClick = onPick)
+            .padding(vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        androidx.compose.material3.RadioButton(selected = selected == value, onClick = { onPick(value) })
-        Text(label, modifier = Modifier.padding(start = 8.dp))
+        RadioButton(selected = selected, onClick = null, enabled = enabled, modifier = Modifier.padding(8.dp))
+        Text(label, Modifier.padding(start = 8.dp), color = if (enabled) Color.Unspecified else Muted)
     }
 }
 
@@ -529,7 +468,7 @@ private fun ChipGrid(
 ) {
     // Plain rows (not lazy): this screen already scrolls, and nested lazy
     // grids fight the outer scroll + mis-measure their height.
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column {
         for (row in cats.chunked(3)) {
             Row(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),

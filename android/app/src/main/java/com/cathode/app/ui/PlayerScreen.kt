@@ -10,22 +10,17 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -227,38 +222,17 @@ fun PlayerScreen(
                     .verticalScroll(rememberScrollState())
                     .padding(16.dp)
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text(video.title.orEmpty(), style = MaterialTheme.typography.titleLarge)
-                        Text(
-                            video.channelTitle.orEmpty(),
-                            style = MaterialTheme.typography.bodyMedium, color = Color.Gray,
-                        )
-                    }
-                    if (saveState is SaveState.Saved) {
-                        Icon(
-                            Icons.Default.Check, contentDescription = "Saved on phone",
-                            tint = AccentTeal, modifier = Modifier.size(24.dp),
-                        )
-                    } else if (saveState is SaveState.Saving) {
-                        Text("Saving…", color = AccentTeal)
-                    }
+                Text(video.title.orEmpty(), style = MaterialTheme.typography.titleMedium)
+                Gap(4)
+                val status = when {
+                    saveState is SaveState.Saving -> "Saving ${(saveState.fraction * 100).toInt()}%"
+                    savedUri != null -> "On phone"
+                    else -> null
                 }
-                Spacer(Modifier.height(12.dp))
-                GlassCard(Modifier.fillMaxWidth()) {
-                    Text(
-                        if (savedUri != null) "Playing the file on your phone — no network needed"
-                        else "Streaming from your server",
-                        color = AccentTeal,
-                    )
-                    Text(
-                        "Resumes where you stopped — switching videos or restarting " +
-                            "the app never loses your place. Tap the fullscreen button " +
-                            "in the player for landscape; audio keeps going if you " +
-                            "browse other tabs.",
-                        style = MaterialTheme.typography.bodySmall, color = Color.Gray,
-                    )
-                }
+                Text(
+                    listOfNotNull(video.channelTitle, status).joinToString("  ·  "),
+                    style = MaterialTheme.typography.bodyMedium, color = Muted,
+                )
             }
         }
     }

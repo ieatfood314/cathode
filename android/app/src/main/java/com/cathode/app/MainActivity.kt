@@ -32,6 +32,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.util.UnstableApi
@@ -126,10 +127,9 @@ class MainActivity : ComponentActivity() {
 
                 fun updatePhoneSummary(n: Int, b: Long, cacheBytes: Long) {
                     savedCount = n
-                    val saved = if (n == 0) "Nothing saved on this phone yet."
-                    else "$n videos · ${formatBytes(b)} saved as files."
-                    savedSummary = "$saved Streaming cache: ${formatBytes(cacheBytes)} " +
-                        "(max ${formatBytes(StreamCache.MAX_BYTES)}, cleared by Android when space runs low)."
+                    val saved = if (n == 0) "No videos saved"
+                    else "$n ${if (n == 1) "video" else "videos"} · ${formatBytes(b)}"
+                    savedSummary = "$saved · ${formatBytes(cacheBytes)} cache"
                     storageLabel = when (val s = store) {
                         is StoreLocation.DefaultMovies -> "Movies/Cathode"
                         is StoreLocation.CustomFolder -> s.label
@@ -249,8 +249,7 @@ class MainActivity : ComponentActivity() {
                 fun loadServer() {
                     if (prefs.serverUrl.isBlank()) return
                     if (!canUseNetwork) {
-                        connStatus = if (wifiBlocked) "Waiting for Wi-Fi (Wi-Fi only is ON)."
-                        else "You're offline."
+                        connStatus = if (wifiBlocked) "Waiting for Wi-Fi" else "Offline"
                         return
                     }
                     serverLoading = true
@@ -262,7 +261,7 @@ class MainActivity : ComponentActivity() {
                             serverDirty = false
                             server = s
                             serverLoading = false
-                            if (s == null) connStatus = "Could not reach the server."
+                            if (s == null) connStatus = "Can't reach server"
                         }
                     }
                 }
@@ -273,8 +272,8 @@ class MainActivity : ComponentActivity() {
                         val ok = runCatching { putServerSettings(url, s) }.isSuccess
                         if (ok) adoptServerPolling(s)
                         withContext(Dispatchers.Main) {
-                            serverStatus = if (ok) "Saved to the server."
-                            else "Couldn't save — will retry on your next change."
+                            // A failed save is retried on the next change.
+                            serverStatus = if (ok) "Saved" else "Couldn't save"
                         }
                     }
                 }
@@ -331,7 +330,7 @@ class MainActivity : ComponentActivity() {
                 Scaffold(
                     bottomBar = {
                         // Hidden in fullscreen so the video fills the screen.
-                        if (!playerFullscreen) NavigationBar {
+                        if (!playerFullscreen) NavigationBar(containerColor = Color.Black) {
                             NavigationBarItem(
                                 selected = tab == 0, onClick = { tab = 0 },
                                 icon = { Icon(Icons.Default.Home, null) }, label = { Text("Library") },
@@ -379,8 +378,7 @@ class MainActivity : ComponentActivity() {
                                 wifiBlocked = wifiBlocked,
                                 notice = when {
                                     prefs.serverUrl.isBlank() || wifiBlocked -> null
-                                    !net.online -> "You're offline — showing your library from " +
-                                        "the last sync. Saved videos still play."
+                                    !net.online -> "Offline"
                                     else -> syncError
                                 },
                                 serverConfigured = storedPrefs == null || prefs.serverUrl.isNotBlank(),
@@ -449,9 +447,13 @@ class MainActivity : ComponentActivity() {
                                             checkHealth(url)
                                             val n = Library.sync(appContext, OfflineRepo.scanned.value)
                                                 .getOrNull()?.size
-                                            "Connected." + if (n != null) " $n videos in the library." else ""
+                                            "Connected" + if (n != null) " · $n videos" else ""
+                                        } catch (e: IllegalArgumentException) {
+                                            "Invalid address"
+                                        } catch (e: java.io.IOException) {
+                                            "Can't connect"
                                         } catch (e: Exception) {
-                                            "Failed: ${e.message}"
+                                            e.message ?: "Can't connect"
                                         }
                                         withContext(Dispatchers.Main) {
                                             connStatus = msg
@@ -481,9 +483,7 @@ private fun NothingPlaying(onBrowse: () -> Unit) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text("Nothing playing", style = MaterialTheme.typography.titleMedium)
-            androidx.compose.material3.TextButton(onClick = onBrowse) {
-                Text("Pick something from your library")
-            }
+            androidx.compose.material3.TextButton(onClick = onBrowse) { Text("Go to library") }
         }
     }
 }

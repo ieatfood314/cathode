@@ -1,10 +1,12 @@
 package com.cathode.app.ui
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -16,46 +18,45 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.DownloadDone
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
-import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.DownloadDone
 import androidx.compose.material.icons.filled.RemoveDone
 import androidx.compose.material.icons.filled.Replay
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Text
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.cathode.app.data.SaveState
 import com.cathode.app.data.Video
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LibraryScreen(
     videos: List<Video>,
@@ -84,80 +85,57 @@ fun LibraryScreen(
         showSaveButtons,
         onOpen, onSetWatched, onClearProgress, onSave, onRemoveSaved,
     )
-    Column(
-        Modifier
-            .fillMaxSize()
-            .background(Color.Black)
-            .padding(16.dp)
-    ) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text("Library", style = MaterialTheme.typography.headlineMedium)
-            Spacer(Modifier.weight(1f))
-            if (loading) {
-                CircularProgressIndicator(
-                    modifier = Modifier.padding(12.dp).size(24.dp), strokeWidth = 2.dp,
-                )
+    val banner = when {
+        !serverConfigured -> null
+        wifiBlocked -> "Waiting for Wi-Fi"
+        else -> notice
+    }
+    Column(Modifier.fillMaxSize().background(Color.Black)) {
+        ScreenTitle("Library", Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp))
+        if (banner != null) Hint(banner, Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
+        PullToRefreshBox(
+            isRefreshing = loading,
+            onRefresh = onRefresh,
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            if (videos.isEmpty()) {
+                // Scrollable so pull-to-refresh works on an empty screen too.
+                Box(
+                    Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    when {
+                        loading -> Unit
+                        !serverConfigured -> EmptyState(
+                            "No server", "Add your server's address to get started.",
+                            action = "Open settings", onAction = onOpenSettings,
+                        )
+                        // Never synced, and this sync failed: nothing cached to show.
+                        notice != null || wifiBlocked -> EmptyState(
+                            "Not synced yet",
+                            if (wifiBlocked) "Connect to Wi-Fi to sync." else "Pull down to retry.",
+                        )
+                        else -> EmptyState("No videos", "Add channels in the Channels tab.")
+                    }
+                }
             } else {
-                IconButton(onClick = onRefresh) {
-                    Icon(Icons.Default.Refresh, contentDescription = "Sync now")
+                // In-progress videos first so "continue watching" sits above
+                // the fold; everything else keeps the server's newest-first order.
+                val (inProgress, rest) = remember(videos) { videos.partition(::isInProgress) }
+                LazyColumn(
+                    Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    if (inProgress.isNotEmpty()) {
+                        item(key = "hdr-continue") { SectionLabel("Continue watching") }
+                        items(inProgress, key = { it.id }) { v -> Item(v) }
+                        if (rest.isNotEmpty()) item(key = "hdr-rest") { SectionLabel("Latest") }
+                    } else {
+                        item(key = "top") { Gap(12) }
+                    }
+                    items(rest, key = { it.id }) { v -> Item(v) }
                 }
-            }
-        }
-        if (wifiBlocked && serverConfigured) {
-            GlassCard(Modifier.fillMaxWidth()) {
-                Text("Paused — waiting for Wi-Fi", color = AccentTeal)
-                Text(
-                    "Wi-Fi only is ON, so nothing uses cellular data. This is your library " +
-                        "from the last sync; saved videos play, and your place in them " +
-                        "syncs once you're back on Wi-Fi.",
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
-            Spacer(Modifier.height(12.dp))
-        } else if (notice != null) {
-            GlassCard(Modifier.fillMaxWidth()) {
-                Text(notice, style = MaterialTheme.typography.bodySmall, color = AccentTeal)
-            }
-            Spacer(Modifier.height(12.dp))
-        }
-        if (videos.isEmpty()) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                when {
-                    loading -> CircularProgressIndicator()
-                    !serverConfigured -> EmptyState(
-                        "Connect your server",
-                        "Enter your Cathode server's address in Settings and your " +
-                            "library shows up here.",
-                        action = "Open Settings", onAction = onOpenSettings,
-                    )
-                    // Never synced, and this sync failed: nothing cached to show.
-                    notice != null || wifiBlocked -> EmptyState(
-                        "Nothing synced to this phone yet",
-                        "Your library appears here after the first successful sync.",
-                        action = if (wifiBlocked) null else "Try again", onAction = onRefresh,
-                    )
-                    else -> EmptyState(
-                        "No videos yet",
-                        "Once the server has downloaded something it appears here. " +
-                            "Add channels in the Channels tab.",
-                    )
-                }
-            }
-            return
-        }
-        // In-progress videos first so "continue watching" sits above the
-        // fold; everything else keeps the server's newest-first order.
-        val (inProgress, rest) = remember(videos) { videos.partition(::isInProgress) }
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            if (inProgress.isNotEmpty()) {
-                item(key = "hdr-continue") { SectionLabel("Continue watching") }
-                items(inProgress, key = { it.id }) { v ->
-                    Item(v)
-                }
-                if (rest.isNotEmpty()) item(key = "hdr-rest") { SectionLabel("Latest") }
-            }
-            items(rest, key = { it.id }) { v ->
-                Item(v)
             }
         }
     }
@@ -174,23 +152,15 @@ private fun watchFraction(v: Video): Float = when {
 
 @Composable
 private fun EmptyState(title: String, body: String, action: String? = null, onAction: () -> Unit = {}) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(24.dp)) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
         Text(title, style = MaterialTheme.typography.titleMedium)
-        Spacer(Modifier.height(8.dp))
-        Text(
-            body, style = MaterialTheme.typography.bodySmall, color = Color.Gray,
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-        )
+        Gap(4)
+        Text(body, style = MaterialTheme.typography.bodyMedium, color = Muted, textAlign = TextAlign.Center)
         if (action != null) {
-            Spacer(Modifier.height(16.dp))
-            Button(onClick = onAction) { Text(action) }
+            Gap(16)
+            OutlinedButton(onClick = onAction) { Text(action) }
         }
     }
-}
-
-@Composable
-private fun SectionLabel(text: String) {
-    Text(text, style = MaterialTheme.typography.labelLarge, color = Color.Gray)
 }
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -210,10 +180,10 @@ private fun VideoRow(
     val haptics = LocalHapticFeedback.current
     var menu by remember { mutableStateOf(false) }
     Box {
-        GlassCard(
+        Row(
             Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(20.dp))
+                .clip(RoundedCornerShape(12.dp))
                 .combinedClickable(
                     onClick = { onOpen(v) },
                     onLongClick = {
@@ -221,58 +191,64 @@ private fun VideoRow(
                         menu = true
                     },
                 )
+                .padding(vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Thumbnail(v, thumb)
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        v.title.orEmpty(),
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                        style = MaterialTheme.typography.titleSmall,
-                        color = if (watched) Color.Gray else Color.Unspecified,
-                    )
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (state is SaveState.Saved) {
-                            Icon(
-                                Icons.Default.DownloadDone, contentDescription = "Saved on phone",
-                                tint = AccentTeal, modifier = Modifier.size(14.dp),
-                            )
-                            Spacer(Modifier.width(4.dp))
-                        }
-                        Text(
-                            v.channelTitle.orEmpty(),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Color.Gray,
+            Thumbnail(v, thumb)
+            Column(Modifier.weight(1f)) {
+                Text(
+                    v.title.orEmpty(),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = if (watched) Muted else Color.Unspecified,
+                )
+                Gap(2)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (state is SaveState.Saved) {
+                        Icon(
+                            Icons.Default.DownloadDone, contentDescription = "On phone",
+                            tint = Muted, modifier = Modifier.size(14.dp),
                         )
+                        Spacer(Modifier.width(4.dp))
                     }
+                    Text(
+                        when (state) {
+                            is SaveState.Saving -> "Saving ${(state.fraction * 100).toInt()}%"
+                            is SaveState.Failed -> "Save failed"
+                            else -> v.channelTitle.orEmpty()
+                        },
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = when (state) {
+                            is SaveState.Saving -> Accent
+                            is SaveState.Failed -> MaterialTheme.colorScheme.error
+                            else -> Muted
+                        },
+                    )
                 }
-                PlayButton(state) { onOpen(v) }
             }
         }
         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
             fun pick(action: () -> Unit) { menu = false; action() }
             if (watched) {
                 DropdownMenuItem(
-                    text = { Text("Mark as unwatched") },
+                    text = { Text("Mark unwatched") },
                     leadingIcon = { Icon(Icons.Default.RemoveDone, null) },
                     onClick = { pick { onSetWatched(v, false) } },
                 )
             } else {
                 DropdownMenuItem(
-                    text = { Text("Mark as watched") },
+                    text = { Text("Mark watched") },
                     leadingIcon = { Icon(Icons.Default.Done, null) },
                     onClick = { pick { onSetWatched(v, true) } },
                 )
             }
             if (!watched && v.positionSeconds > 0) {
                 DropdownMenuItem(
-                    text = { Text("Start from the beginning") },
+                    text = { Text("Start over") },
                     leadingIcon = { Icon(Icons.Default.Replay, null) },
                     onClick = { pick { onClearProgress(v) } },
                 )
@@ -285,40 +261,11 @@ private fun VideoRow(
                 )
                 is SaveState.Saving -> Unit
                 else -> DropdownMenuItem(
-                    text = { Text("Save on phone") },
+                    text = { Text("Save to phone") },
                     leadingIcon = { Icon(Icons.Default.Download, null) },
                     onClick = { pick { onSave(v) } },
                 )
             }
-        }
-    }
-}
-
-/** Big play button; while the phone copy downloads, a ring shows how far along it is. */
-@Composable
-private fun PlayButton(state: SaveState, onClick: () -> Unit) {
-    Box(Modifier.size(56.dp), contentAlignment = Alignment.Center) {
-        if (state is SaveState.Saving) {
-            CircularProgressIndicator(
-                progress = { state.fraction },
-                modifier = Modifier.fillMaxSize(),
-                color = AccentTeal,
-                strokeWidth = 3.dp,
-                trackColor = Color(0x33FFFFFF),
-            )
-        }
-        Box(
-            Modifier
-                .size(48.dp)
-                .clip(CircleShape)
-                .background(AccentViolet)
-                .clickable(onClick = onClick),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                Icons.Default.PlayArrow, contentDescription = "Play",
-                tint = Color.White, modifier = Modifier.size(32.dp),
-            )
         }
     }
 }
@@ -329,8 +276,8 @@ private fun Thumbnail(v: Video, thumb: String) {
     Box(
         Modifier
             .size(width = 128.dp, height = 72.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .background(Color(0xFF1A1A22))
+            .clip(RoundedCornerShape(8.dp))
+            .background(Surface1)
     ) {
         AsyncImage(
             model = thumb,
@@ -339,29 +286,29 @@ private fun Thumbnail(v: Video, thumb: String) {
             modifier = Modifier.fillMaxSize(),
         )
         if (watched) {
-            // Completion marker: dimmed thumbnail + check badge.
+            // Completion marker: dimmed thumbnail + check.
             Box(Modifier.fillMaxSize().background(Color(0x99000000)))
             Icon(
-                Icons.Default.CheckCircle,
+                Icons.Default.Check,
                 contentDescription = "Watched",
-                tint = AccentTeal,
-                modifier = Modifier.align(Alignment.Center).size(28.dp),
+                tint = Color.White,
+                modifier = Modifier.align(Alignment.Center).size(24.dp),
             )
         }
-        if (v.duration > 0) {
+        if (v.duration > 0 && !watched) {
             Text(
                 formatDuration(v.duration),
                 style = MaterialTheme.typography.labelSmall,
                 color = Color.White,
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(bottom = 7.dp, end = 4.dp)
+                    .padding(bottom = 6.dp, end = 4.dp)
                     .background(Color(0xB3000000), RoundedCornerShape(4.dp))
                     .padding(horizontal = 4.dp),
             )
         }
         val fraction = watchFraction(v)
-        if (fraction > 0f) {
+        if (fraction > 0f && !watched) {
             // Watch-progress bar along the thumbnail's bottom edge.
             Box(
                 Modifier
@@ -370,12 +317,7 @@ private fun Thumbnail(v: Video, thumb: String) {
                     .height(3.dp)
                     .background(Color(0x66FFFFFF))
             ) {
-                Box(
-                    Modifier
-                        .fillMaxWidth(fraction)
-                        .fillMaxHeight()
-                        .background(if (watched) AccentTeal else AccentViolet)
-                )
+                Box(Modifier.fillMaxWidth(fraction).fillMaxHeight().background(Accent))
             }
         }
     }
