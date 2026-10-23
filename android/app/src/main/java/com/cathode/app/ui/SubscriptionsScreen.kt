@@ -20,6 +20,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -71,6 +73,7 @@ fun SubscriptionsScreen(serverUrl: String) {
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
     var newUrl by remember { mutableStateOf("") }
+    var showHelp by remember { mutableStateOf(false) }
 
     fun reload() {
         if (serverUrl.isBlank()) return
@@ -170,17 +173,15 @@ fun SubscriptionsScreen(serverUrl: String) {
             TextButton(onClick = { picker.launch("*/*") }, enabled = !busy && ready) {
                 Text("Import file")
             }
+            IconButton(onClick = { showHelp = true }) {
+                Icon(Icons.Outlined.Info, contentDescription = "How to import", tint = Muted)
+            }
             if (busy) {
                 CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
             } else if (message != null) {
                 Hint(message!!)
             }
         }
-        // A new .csv or .opml replaces the previous import of that kind; a
-        // .txt list adds to what's there.
-        Hint("Google Takeout CSV or OPML replaces the last import. TXT adds.",
-            Modifier.padding(start = 12.dp))
-
         Row(verticalAlignment = Alignment.CenterVertically) {
             SectionLabel(if (inputs.isEmpty()) "Following" else "Following · ${inputs.size}")
             Spacer(Modifier.weight(1f))
@@ -209,4 +210,26 @@ fun SubscriptionsScreen(serverUrl: String) {
         }
         Gap(16)
     }
+    if (showHelp) ImportHelp(onDismiss = { showHelp = false })
+}
+
+@Composable
+private fun ImportHelp(onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Import your subscriptions") },
+        text = {
+            Text(
+                "1. On a computer, open takeout.google.com.\n" +
+                    "2. Deselect all, then select YouTube and YouTube Music.\n" +
+                    "3. Under All YouTube data included, keep only subscriptions.\n" +
+                    "4. Create the export, download it and unzip. You want " +
+                    "subscriptions.csv.\n" +
+                    "5. Get it onto this phone and tap Import file.\n\n" +
+                    "An OPML export from another app works too. A new CSV or OPML " +
+                    "replaces the last one; a .txt list of channel links adds to it."
+            )
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("OK") } },
+    )
 }
