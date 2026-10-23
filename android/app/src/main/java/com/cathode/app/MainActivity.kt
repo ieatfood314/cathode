@@ -170,6 +170,18 @@ class MainActivity : ComponentActivity() {
                             else syncFailureMessage(result.exceptionOrNull())
                         }
                         val feed = result.getOrNull()
+                        val keepDays = feed?.let {
+                            runCatching { getServerSettings(p.serverUrl).keepDays }.getOrNull()
+                        }
+                        if (feed != null && keepDays != null) {
+                            // Never pull a copy out from under the player.
+                            val expired = Library.expired(feed, keepDays) - setOfNotNull(Playback.videoId)
+                            expired.forEach { OfflineRepo.remove(appContext, loc, it) }
+                            if (expired.isNotEmpty()) {
+                                Library.forget(appContext, expired)
+                                rescanPhone(loc)
+                            }
+                        }
                         if (feed != null && p.saveOnPhone && p.autoSaveNew) {
                             OfflineRepo.autoSaveNew(
                                 appContext, loc, feed,

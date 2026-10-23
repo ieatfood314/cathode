@@ -14,6 +14,8 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.MapSerializer
 import kotlinx.serialization.builtins.serializer
 import java.io.File
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 
 /** A watch-state change the server hasn't heard about yet (offline, server down). */
 @Serializable
@@ -87,6 +89,34 @@ object Library {
                 writeLibrary(context)
             }
             feed
+        }
+    }
+
+    /**
+     * Phone-only videos past the server's "Keep" window. The server prunes by
+     * upload date, but phone copies outlived it, so a years-old video saved
+     * once stayed in the library forever. Undated ones go by download time,
+     * like on the server.
+     */
+    fun expired(feed: List<Video>, keepDays: Int): Set<String> {
+        if (keepDays <= 0) return emptySet()
+        val onServer = feed.mapTo(HashSet()) { it.id }
+        val cutoff = LocalDate.now().minusDays(keepDays.toLong())
+            .format(DateTimeFormatter.BASIC_ISO_DATE)
+        val cutoffSec = System.currentTimeMillis() / 1000 - keepDays * 86_400L
+        return _videos.value.filter { v ->
+            v.id !in onServer && (v.uploadDate?.takeIf { it.length == 8 }?.let { it < cutoff }
+                ?: (v.downloadedAt in 1 until cutoffSec))
+        }.mapTo(HashSet()) { it.id }
+    }
+
+    /** Drop videos from the cached library (their phone copies are already gone). */
+    fun forget(context: Context, ids: Set<String>) {
+        if (ids.isEmpty()) return
+        load(context)
+        synchronized(lock) {
+            _videos.value = _videos.value.filterNot { it.id in ids }
+            writeLibrary(context)
         }
     }
 
