@@ -124,10 +124,12 @@ class MainActivity : ComponentActivity() {
 
                 fun streamUrl(v: Video) = "${prefs.serverUrl}/api/videos/${v.id}/stream"
 
-                fun updatePhoneSummary(n: Int, b: Long) {
+                fun updatePhoneSummary(n: Int, b: Long, cacheBytes: Long) {
                     savedCount = n
-                    savedSummary = if (n == 0) "Nothing saved on this phone yet."
+                    val saved = if (n == 0) "Nothing saved on this phone yet."
                     else "$n videos · ${formatBytes(b)} saved as files."
+                    savedSummary = "$saved Streaming cache: ${formatBytes(cacheBytes)} " +
+                        "(max ${formatBytes(StreamCache.MAX_BYTES)}, cleared by Android when space runs low)."
                     storageLabel = when (val s = store) {
                         is StoreLocation.DefaultMovies -> "Movies/Cathode"
                         is StoreLocation.CustomFolder -> s.label
@@ -136,7 +138,8 @@ class MainActivity : ComponentActivity() {
 
                 suspend fun rescanPhone(loc: StoreLocation) {
                     val (n, b) = OfflineRepo.rescan(appContext, loc)
-                    withContext(Dispatchers.Main) { updatePhoneSummary(n, b) }
+                    val cache = runCatching { StreamCache.get(appContext).cacheSpace }.getOrDefault(0L)
+                    withContext(Dispatchers.Main) { updatePhoneSummary(n, b, cache) }
                 }
 
                 fun saveVideo(v: Video) {

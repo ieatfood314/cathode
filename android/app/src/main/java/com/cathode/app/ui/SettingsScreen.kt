@@ -187,10 +187,19 @@ fun SettingsScreen(
             SwitchRow("Save new videos automatically",
                 "After each sync, new arrivals are saved in the background.",
                 prefs.autoSaveNew) { on -> onPrefs { it.copy(autoSaveNew = on) } }
-            SwitchRow("Delete phone copy after watching",
-                "Frees space once a video is watched — when you close it, so nothing " +
-                    "disappears mid-play.",
-                prefs.deleteAfterWatched) { on -> onPrefs { it.copy(deleteAfterWatched = on) } }
+            AfterWatchingRow(
+                phone = prefs.deleteAfterWatched,
+                server = server?.deleteAfterWatched,
+                onPick = { mode ->
+                    onPrefs { it.copy(deleteAfterWatched = mode != AfterWatching.KEEP) }
+                    if (server != null) {
+                        val everywhere = mode == AfterWatching.EVERYWHERE
+                        if (server.deleteAfterWatched != everywhere) {
+                            onServer(server.copy(deleteAfterWatched = everywhere))
+                        }
+                    }
+                },
+            )
             StorageFolderRow(
                 storageLabel = storageLabel,
                 isCustom = prefs.storageUri.isNotBlank(),
@@ -283,9 +292,6 @@ fun SettingsScreen(
                     "newest uploads. Only adds downloads; never deletes any.",
                     style = MaterialTheme.typography.bodySmall, color = Color.Gray)
                 BackfillRow(server.backfillDays) { onServer(server.copy(backfillDays = it)) }
-                SwitchRow("Delete server file after watching",
-                    "Frees server space once a video is watched (finished or marked). Off by default.",
-                    server.deleteAfterWatched) { onServer(server.copy(deleteAfterWatched = it)) }
             }
         } else {
             GlassCard(Modifier.fillMaxWidth()) {
@@ -363,6 +369,53 @@ private fun PollingCard(server: ServerSettings, onServer: (ServerSettings) -> Un
                 "sync runs at most every 15 min (Android limit).",
             style = MaterialTheme.typography.bodySmall, color = Color.Gray,
         )
+    }
+}
+
+enum class AfterWatching(val label: String) {
+    KEEP("Keep it"), PHONE("Delete the phone copy"), EVERYWHERE("Delete from phone and server")
+}
+
+/**
+ * One choice for what happens to a watched video. It used to be two
+ * switches on two cards (phone, server), and it wasn't obvious that the
+ * phone one is what frees phone storage.
+ */
+@Composable
+private fun AfterWatchingRow(phone: Boolean, server: Boolean?, onPick: (AfterWatching) -> Unit) {
+    val current = when {
+        server == true -> AfterWatching.EVERYWHERE
+        phone -> AfterWatching.PHONE
+        else -> AfterWatching.KEEP
+    }
+    Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        Text("After watching")
+        Text(
+            when (current) {
+                AfterWatching.KEEP -> "Watched videos stay on this phone and the server."
+                AfterWatching.PHONE -> "The phone copy is deleted when you close a watched " +
+                    "video (never mid-play). The server keeps it, so you can save it again."
+                AfterWatching.EVERYWHERE -> "Deleted from this phone when you close it, and " +
+                    "from the server as soon as it's watched. Gone for good."
+            },
+            style = MaterialTheme.typography.bodySmall, color = Color.Gray,
+        )
+        for (mode in AfterWatching.entries) {
+            // The server half can only change while the server is reachable.
+            val enabled = server != null || mode != AfterWatching.EVERYWHERE
+            Row(
+                Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                androidx.compose.material3.RadioButton(
+                    selected = mode == current, onClick = { onPick(mode) }, enabled = enabled,
+                )
+                Text(
+                    mode.label, modifier = Modifier.padding(start = 8.dp),
+                    color = if (enabled) Color.Unspecified else Color.Gray,
+                )
+            }
+        }
     }
 }
 
