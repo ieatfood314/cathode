@@ -36,6 +36,21 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Done
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.RemoveDone
+import androidx.compose.material.icons.filled.Replay
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import coil.compose.AsyncImage
 import com.cathode.app.data.SaveState
 import com.cathode.app.data.Video
@@ -50,7 +65,16 @@ fun LibraryScreen(
     showSaveButtons: Boolean,
     onRefresh: () -> Unit,
     onOpen: (Video) -> Unit,
+    onSetWatched: (Video, Boolean) -> Unit,
+    onClearProgress: (Video) -> Unit,
+    onSave: (Video) -> Unit,
+    onRemoveSaved: (Video) -> Unit,
 ) {
+    @Composable
+    fun Item(v: Video) = VideoRow(
+        v, thumbUrl(v), saveStates[v.id] ?: SaveState.NotSaved, showSaveButtons,
+        onOpen, onSetWatched, onClearProgress, onSave, onRemoveSaved,
+    )
     Column(
         Modifier
             .fillMaxSize()
@@ -87,12 +111,12 @@ fun LibraryScreen(
             if (inProgress.isNotEmpty()) {
                 item(key = "hdr-continue") { SectionLabel("Continue watching") }
                 items(inProgress, key = { it.id }) { v ->
-                    VideoRow(v, thumbUrl(v), saveStates[v.id] ?: SaveState.NotSaved, onOpen)
+                    Item(v)
                 }
                 if (rest.isNotEmpty()) item(key = "hdr-rest") { SectionLabel("Latest") }
             }
             items(rest, key = { it.id }) { v ->
-                VideoRow(v, thumbUrl(v), saveStates[v.id] ?: SaveState.NotSaved, onOpen)
+                Item(v)
             }
         }
     }
@@ -112,101 +136,189 @@ private fun SectionLabel(text: String) {
     Text(text, style = MaterialTheme.typography.labelLarge, color = Color.Gray)
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun VideoRow(v: Video, thumb: String, state: SaveState, onOpen: (Video) -> Unit) {
+private fun VideoRow(
+    v: Video,
+    thumb: String,
+    state: SaveState,
+    showSave: Boolean,
+    onOpen: (Video) -> Unit,
+    onSetWatched: (Video, Boolean) -> Unit,
+    onClearProgress: (Video) -> Unit,
+    onSave: (Video) -> Unit,
+    onRemoveSaved: (Video) -> Unit,
+) {
     val watched = v.watched == 1
-    GlassCard(
-        Modifier
-            .fillMaxWidth()
-            .clickable { onOpen(v) }
-    ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Box(
-                Modifier
-                    .size(width = 128.dp, height = 72.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(Color(0xFF1A1A22))
-            ) {
-                AsyncImage(
-                    model = thumb,
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize(),
+    val haptics = LocalHapticFeedback.current
+    var menu by remember { mutableStateOf(false) }
+    Box {
+        GlassCard(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(20.dp))
+                .combinedClickable(
+                    onClick = { onOpen(v) },
+                    onLongClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        menu = true
+                    },
                 )
-                if (watched) {
-                    // Completion marker: dimmed thumbnail + check badge.
-                    Box(Modifier.fillMaxSize().background(Color(0x99000000)))
-                    Icon(
-                        Icons.Default.CheckCircle,
-                        contentDescription = "Watched",
-                        tint = AccentTeal,
-                        modifier = Modifier.align(Alignment.Center).size(28.dp),
-                    )
-                }
-                if (v.duration > 0) {
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Thumbnail(v, thumb)
+                Column(Modifier.weight(1f)) {
                     Text(
-                        formatDuration(v.duration),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Color.White,
-                        modifier = Modifier
-                            .align(Alignment.BottomEnd)
-                            .padding(bottom = 7.dp, end = 4.dp)
-                            .background(Color(0xB3000000), RoundedCornerShape(4.dp))
-                            .padding(horizontal = 4.dp),
+                        v.title.orEmpty(),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.titleSmall,
+                        color = if (watched) Color.Gray else Color.Unspecified,
                     )
-                }
-                val fraction = watchFraction(v)
-                if (fraction > 0f) {
-                    // Watch-progress bar along the thumbnail's bottom edge.
-                    Box(
-                        Modifier
-                            .align(Alignment.BottomStart)
-                            .fillMaxWidth()
-                            .height(3.dp)
-                            .background(Color(0x66FFFFFF))
-                    ) {
-                        Box(
-                            Modifier
-                                .fillMaxWidth(fraction)
-                                .fillMaxHeight()
-                                .background(if (watched) AccentTeal else AccentViolet)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (state is SaveState.Saved) {
+                            Icon(
+                                Icons.Default.DownloadDone, contentDescription = "Saved on phone",
+                                tint = AccentTeal, modifier = Modifier.size(14.dp),
+                            )
+                            Spacer(Modifier.width(4.dp))
+                        }
+                        Text(
+                            v.channelTitle.orEmpty(),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.Gray,
                         )
                     }
                 }
+                PlayButton(state) { onOpen(v) }
             }
-            Column(Modifier.weight(1f)) {
-                Text(
-                    v.title.orEmpty(),
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.titleSmall,
-                    color = if (watched) Color.Gray else Color.Unspecified,
+        }
+        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+            fun pick(action: () -> Unit) { menu = false; action() }
+            if (watched) {
+                DropdownMenuItem(
+                    text = { Text("Mark as unwatched") },
+                    leadingIcon = { Icon(Icons.Default.RemoveDone, null) },
+                    onClick = { pick { onSetWatched(v, false) } },
                 )
-                Text(
-                    v.channelTitle.orEmpty(),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Color.Gray,
+            } else {
+                DropdownMenuItem(
+                    text = { Text("Mark as watched") },
+                    leadingIcon = { Icon(Icons.Default.Done, null) },
+                    onClick = { pick { onSetWatched(v, true) } },
                 )
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.PlayArrow, contentDescription = null, tint = AccentTeal)
-                    Text(
-                        when {
-                            watched -> "Watched"
-                            isInProgress(v) && v.duration > 0 ->
-                                "${formatDuration((v.duration - v.positionSeconds).coerceAtLeast(1))} left"
-                            state is SaveState.Saving -> "Auto-saving ${"%.0f".format(state.fraction * 100)}%"
-                            state is SaveState.Saved -> "Saved on phone — tap to watch"
-                            else -> "Tap to watch (auto-saves)"
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
             }
-            if (state is SaveState.Saved) {
-                Icon(Icons.Default.DownloadDone, contentDescription = "Saved on phone",
-                    tint = AccentTeal, modifier = Modifier.width(24.dp))
+            if (!watched && v.positionSeconds > 0) {
+                DropdownMenuItem(
+                    text = { Text("Start from the beginning") },
+                    leadingIcon = { Icon(Icons.Default.Replay, null) },
+                    onClick = { pick { onClearProgress(v) } },
+                )
+            }
+            if (showSave) when (state) {
+                is SaveState.Saved -> DropdownMenuItem(
+                    text = { Text("Remove from phone") },
+                    leadingIcon = { Icon(Icons.Default.Delete, null) },
+                    onClick = { pick { onRemoveSaved(v) } },
+                )
+                is SaveState.Saving -> Unit
+                else -> DropdownMenuItem(
+                    text = { Text("Save on phone") },
+                    leadingIcon = { Icon(Icons.Default.Download, null) },
+                    onClick = { pick { onSave(v) } },
+                )
+            }
+        }
+    }
+}
+
+/** Big play button; while the phone copy downloads, a ring shows how far along it is. */
+@Composable
+private fun PlayButton(state: SaveState, onClick: () -> Unit) {
+    Box(Modifier.size(56.dp), contentAlignment = Alignment.Center) {
+        if (state is SaveState.Saving) {
+            CircularProgressIndicator(
+                progress = { state.fraction },
+                modifier = Modifier.fillMaxSize(),
+                color = AccentTeal,
+                strokeWidth = 3.dp,
+                trackColor = Color(0x33FFFFFF),
+            )
+        }
+        Box(
+            Modifier
+                .size(48.dp)
+                .clip(CircleShape)
+                .background(AccentViolet)
+                .clickable(onClick = onClick),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                Icons.Default.PlayArrow, contentDescription = "Play",
+                tint = Color.White, modifier = Modifier.size(32.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun Thumbnail(v: Video, thumb: String) {
+    val watched = v.watched == 1
+    Box(
+        Modifier
+            .size(width = 128.dp, height = 72.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color(0xFF1A1A22))
+    ) {
+        AsyncImage(
+            model = thumb,
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.fillMaxSize(),
+        )
+        if (watched) {
+            // Completion marker: dimmed thumbnail + check badge.
+            Box(Modifier.fillMaxSize().background(Color(0x99000000)))
+            Icon(
+                Icons.Default.CheckCircle,
+                contentDescription = "Watched",
+                tint = AccentTeal,
+                modifier = Modifier.align(Alignment.Center).size(28.dp),
+            )
+        }
+        if (v.duration > 0) {
+            Text(
+                formatDuration(v.duration),
+                style = MaterialTheme.typography.labelSmall,
+                color = Color.White,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(bottom = 7.dp, end = 4.dp)
+                    .background(Color(0xB3000000), RoundedCornerShape(4.dp))
+                    .padding(horizontal = 4.dp),
+            )
+        }
+        val fraction = watchFraction(v)
+        if (fraction > 0f) {
+            // Watch-progress bar along the thumbnail's bottom edge.
+            Box(
+                Modifier
+                    .align(Alignment.BottomStart)
+                    .fillMaxWidth()
+                    .height(3.dp)
+                    .background(Color(0x66FFFFFF))
+            ) {
+                Box(
+                    Modifier
+                        .fillMaxWidth(fraction)
+                        .fillMaxHeight()
+                        .background(if (watched) AccentTeal else AccentViolet)
+                )
             }
         }
     }

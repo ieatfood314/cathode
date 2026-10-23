@@ -63,6 +63,14 @@ fun putProgress(baseUrl: String, videoId: String, positionSeconds: Int): Boolean
     }
 }
 
+/** Mark a video watched / unwatched by hand (long-press menu, end of playback). */
+fun setWatched(baseUrl: String, videoId: String, watched: Boolean) {
+    baseClient().newCall(
+        Request.Builder().url("$baseUrl/api/videos/$videoId/watched?watched=$watched")
+            .post(ByteArray(0).toRequestBody(null)).build()
+    ).execute().close()
+}
+
 fun triggerServerPoll(baseUrl: String): String {
     baseClient().newCall(
         Request.Builder().url("$baseUrl/api/subscriptions/refresh").post(ByteArray(0).toRequestBody(null)).build()

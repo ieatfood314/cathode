@@ -40,6 +40,7 @@ import com.cathode.app.data.isUnmetered
 import com.cathode.app.data.putServerSettings
 import com.cathode.app.data.putProgress
 import com.cathode.app.data.resolveStore
+import com.cathode.app.data.setWatched
 import com.cathode.app.player.Playback
 import com.cathode.app.player.PlaybackService
 import com.cathode.app.ui.LibraryScreen
@@ -55,7 +56,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.File
 
 @UnstableApi
@@ -150,6 +150,29 @@ class MainActivity : ComponentActivity() {
                 // bars and "Continue watching" order don't wait for a refresh.
                 fun patchPosition(id: String, pos: Int) {
                     videos = videos.map { if (it.id == id) it.copy(positionSeconds = pos) else it }
+                }
+
+                fun markWatched(v: Video) {
+                    videos = videos.map { if (it.id == v.id) it.copy(watched = 1) else it }
+                    scope.launch(Dispatchers.IO) {
+                        runCatching { setWatched(prefs.serverUrl, v.id, true) }
+                        if (prefs.deleteAfterWatched) {
+                            OfflineRepo.remove(appContext, store, v.id)
+                        }
+                        refresh()
+                    }
+                }
+
+                // Unwatched and "start over" are the same thing: position 0
+                // (the server clears watched along with it).
+                fun resetProgress(v: Video) {
+                    videos = videos.map {
+                        if (it.id == v.id) it.copy(watched = 0, positionSeconds = 0) else it
+                    }
+                    scope.launch(Dispatchers.IO) {
+                        runCatching { putProgress(prefs.serverUrl, v.id, 0) }
+                        refresh()
+                    }
                 }
 
                 // Shared by the player's periodic saver, leaving the player
@@ -320,26 +343,7 @@ class MainActivity : ComponentActivity() {
                                     val v = open
                                     if (v == null) false else submitProgress(v, pos)
                                 },
-                                onWatched = {
-                                    val v = open!!
-                                    videos = videos.map {
-                                        if (it.id == v.id) it.copy(watched = 1) else it
-                                    }
-                                    scope.launch(Dispatchers.IO) {
-                                        runCatching {
-                                            okhttp3.OkHttpClient().newCall(
-                                                okhttp3.Request.Builder()
-                                                    .url("${prefs.serverUrl}/api/videos/${v.id}/watched?watched=true")
-                                                    .post(ByteArray(0).toRequestBody(null))
-                                                    .build()
-                                            ).execute().close()
-                                        }
-                                        if (prefs.deleteAfterWatched) {
-                                            OfflineRepo.remove(appContext, store, v.id)
-                                        }
-                                        refresh()
-                                    }
-                                },
+                                onWatched = { markWatched(open!!) },
                             )
                             tab == 0 -> LibraryScreen(
                                 videos = videos,
@@ -374,6 +378,16 @@ class MainActivity : ComponentActivity() {
                                     startForegroundService(
                                         Intent(this@MainActivity, PlaybackService::class.java)
                                     )
+                                },
+                                onSetWatched = { v, w -> if (w) markWatched(v) else resetProgress(v) },
+                                onClearProgress = { v -> resetProgress(v) },
+                                onSave = { v -> saveVideo(v) },
+                                onRemoveSaved = { v ->
+                                    scope.launch(Dispatchers.IO) {
+                                        OfflineRepo.remove(appContext, store, v.id)
+                                        val (n, b) = OfflineRepo.rescan(appContext, store)
+                                        withContext(Dispatchers.Main) { updatePhoneSummary(n, b) }
+                                    }
                                 },
                             )
                             tab == 1 -> SubscriptionsScreen(serverUrl = prefs.serverUrl)
