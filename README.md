@@ -48,7 +48,9 @@ offline sync there).
 
 ## Android app (Obtainium)
 
-OLED black (`#000000`) + frosted glass cards, bottom-nav Library / Now playing / Settings.
+OLED black (`#000000`), flat panels, one violet accent. Bottom nav: Library / Channels / Playing / Stats / Settings.
+
+**Stats** shows how long you've actually spent watching: today, the last 7 days, a daily average, all time, a two-week chart and your top channels. Only time spent playing counts (not paused or buffering), and time watched offline is added once the phone is back on Wi-Fi. The web UI's player counts too.
 
 **Install via [Obtainium](https://apps.obtainium.imranr.dev/)** (update tracking, no store needed): add app → source GitHub → `https://github.com/ieatfood314/cathode` — it picks up each release APK automatically. Or download the APK from the [releases page](../../releases) and install directly.
 
@@ -100,6 +102,8 @@ The mode and interval live in Settings → Server config; the server also expose
 | POST | `/api/subscriptions/refresh` | starts a background scan, returns immediately (app calls on open) |
 | POST | `/api/videos/{id}/progress` | `{"position_seconds": N}`; auto-marks watched near the end, never unmarks |
 | POST | `/api/videos/{id}/watched?watched=true` | watch state (`false` also rewinds to the start) |
+| POST | `/api/watchtime` | `{"sessions": [{id, video_id, day, seconds}]}` running totals per video per day; the larger total wins, so resending is safe |
+| GET | `/api/stats?since=YYYY-MM-DD` | watch time per day and channel since that date, plus the all-time total |
 | POST | `/api/subscriptions/upload` | `.opml` / `.csv` (replaces that file once it parses) or `.txt` (adds) |
 
 ## Privacy / self-host notes

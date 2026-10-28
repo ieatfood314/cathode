@@ -78,6 +78,8 @@ object Library {
         val base = target(context) ?: return Result.failure(OfflineException())
         return runCatching {
             flushPending(context, base)
+            // Watch time is best-effort: an older server without it still syncs.
+            WatchTime.flush(context)
             val feed = fetchFeed(base)
             synchronized(lock) {
                 val onServer = feed.mapTo(HashSet()) { it.id }
@@ -147,7 +149,8 @@ object Library {
         }
     }
 
-    private suspend fun target(context: Context): String? {
+    /** Server URL, or null while it can't be used (none set, offline, Wi-Fi only). */
+    internal suspend fun target(context: Context): String? {
         val p = PrefsRepo(context).flow.first()
         if (p.serverUrl.isBlank() || !networkAllowed(context, p.wifiOnly)) return null
         return p.serverUrl
@@ -220,7 +223,7 @@ object Library {
     private fun writePending(context: Context) =
         writeAtomic(pendingFile(context), json.encodeToString(pendingSerializer, pending))
 
-    private fun writeAtomic(f: File, text: String) {
+    internal fun writeAtomic(f: File, text: String) {
         runCatching {
             val tmp = File(f.path + ".tmp")
             tmp.writeText(text)

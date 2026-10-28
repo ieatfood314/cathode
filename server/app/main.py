@@ -5,6 +5,7 @@ import os
 import re
 import sqlite3
 from contextlib import asynccontextmanager
+from datetime import date, timedelta
 from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
@@ -104,6 +105,75 @@ def save_progress(video_id: str, body: ProgressIn):
     conn.close()
     return {"ok": True, "position_seconds": int(pos),
             "watched": near_end or bool(row["watched"])}
+
+
+class WatchSessionIn(BaseModel):
+    id: str
+    video_id: str = ""
+    day: str
+    seconds: float
+    channel: str | None = None
+
+
+class WatchTimeIn(BaseModel):
+    sessions: list[WatchSessionIn]
+
+
+DAY_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+
+@app.post("/api/watchtime")
+def save_watch_time(body: WatchTimeIn):
+    """Time spent actually playing, for the Stats tab.
+
+    Each session (one video, one day, one device) arrives with its running
+    total, and the larger of stored and sent wins: a batch the phone resends
+    after a dropped reply, or replays after being offline, never counts twice.
+    Malformed entries are dropped rather than failing the batch, so one bad
+    entry can't wedge a phone's queue.
+    """
+    conn = _conn()
+    stored = 0
+    for s in body.sessions[:1000]:
+        if not s.id or len(s.id) > 64 or not DAY_RE.fullmatch(s.day):
+            continue
+        secs = max(0.0, min(86400.0, float(s.seconds)))
+        row = conn.execute("SELECT channel_title FROM videos WHERE id=?", (s.video_id,)).fetchone()
+        channel = (row["channel_title"] if row else None) or s.channel
+        conn.execute(
+            "INSERT INTO watch_sessions(id, video_id, channel_title, day, seconds, updated) "
+            "VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET "
+            "seconds=MAX(watch_sessions.seconds, excluded.seconds), "
+            "channel_title=COALESCE(watch_sessions.channel_title, excluded.channel_title), "
+            "updated=excluded.updated",
+            (s.id, s.video_id, channel, s.day, secs, dbmod.now()),
+        )
+        stored += 1
+    conn.commit()
+    conn.close()
+    return {"ok": True, "stored": stored}
+
+
+@app.get("/api/stats")
+def watch_stats(since: str | None = None):
+    """Watch time per day and channel from `since` (the client's local date;
+    default 30 days ago), plus the all-time total. Clients do the windowing
+    (today, last 7 days) in their own time zone."""
+    if since is None:
+        since = (date.today() - timedelta(days=29)).isoformat()
+    elif not DAY_RE.fullmatch(since):
+        raise HTTPException(400, "since must be YYYY-MM-DD")
+    conn = _conn()
+    rows = [dict(r) for r in conn.execute(
+        "SELECT day, COALESCE(channel_title, '') AS channel, SUM(seconds) AS seconds "
+        "FROM watch_sessions WHERE day >= ? GROUP BY day, channel ORDER BY day",
+        (since,)).fetchall()]
+    total = conn.execute(
+        "SELECT COALESCE(SUM(seconds), 0) AS total, MIN(day) AS first FROM watch_sessions"
+    ).fetchone()
+    conn.close()
+    return {"since": since, "rows": rows, "total_seconds": total["total"],
+            "first_day": total["first"]}
 
 
 @app.get("/api/videos/{video_id}")

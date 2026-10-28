@@ -35,7 +35,18 @@ CREATE TABLE IF NOT EXISTS kv (
   k TEXT PRIMARY KEY,
   v TEXT
 );
+-- Time spent playing (Stats tab). One row per video, per day, per device;
+-- the client sends each one's running total.
+CREATE TABLE IF NOT EXISTS watch_sessions (
+  id TEXT PRIMARY KEY,
+  video_id TEXT,
+  channel_title TEXT,
+  day TEXT NOT NULL,          -- the viewer's local date, YYYY-MM-DD
+  seconds REAL DEFAULT 0,
+  updated INTEGER DEFAULT 0
+);
 CREATE INDEX IF NOT EXISTS idx_videos_published ON videos(published DESC);
+CREATE INDEX IF NOT EXISTS idx_watch_sessions_day ON watch_sessions(day);
 """
 
 

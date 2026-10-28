@@ -18,6 +18,7 @@ import androidx.media3.session.MediaSession
 import com.cathode.app.MainActivity
 import com.cathode.app.data.Library
 import com.cathode.app.data.Video
+import com.cathode.app.data.WatchTime
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -57,6 +58,7 @@ object Playback {
             session?.let { value?.addSession(it) }
         }
     private var player: ExoPlayer? = null
+    private var appContext: Context? = null
     private var saverJob: kotlinx.coroutines.Job? = null
     // ExoPlayer must only be touched on the main thread: an IO-thread saver
     // threw on every read, so background progress was never saved.
@@ -80,6 +82,8 @@ object Playback {
         val sourceSwap = existing != null && videoId == id
         val startMs = if (sourceSwap) existing?.currentPosition ?: resumeMs else resumeMs
         val keepPlaying = if (sourceSwap) existing?.playWhenReady ?: true else true
+        // A released player reports nothing more: stop its watch time first.
+        if (existing != null) WatchTime.stop(context)
         // Session wrappers listen to their player: always retire the session
         // before the player it references.
         retireSession()
@@ -125,11 +129,13 @@ object Playback {
         fresh.prepare()
         fresh.playWhenReady = keepPlaying
         player = fresh
-        attachSessionAndSaver(context.applicationContext, fresh, id)
+        appContext = context.applicationContext
+        attachSessionAndSaver(context.applicationContext, fresh, video)
         return fresh
     }
 
-    private fun attachSessionAndSaver(app: Context, fresh: ExoPlayer, id: String) {
+    private fun attachSessionAndSaver(app: Context, fresh: ExoPlayer, video: Video) {
+        val id = video.id
         // Session tap in Android's media player brings back this video's player.
         val launch = PendingIntent.getActivity(
             app, 1,
@@ -151,9 +157,15 @@ object Playback {
             }
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
+                // Buffering, paused and ended all stop the watch-time clock.
+                if (isPlaying) {
+                    WatchTime.start(app, video)
+                    return
+                }
+                WatchTime.stop(app)
                 // Paused (headphones out, notification, lock screen): save now,
                 // not up to 5 s later — the app may be killed in between.
-                if (isPlaying || fresh.playbackState == Player.STATE_ENDED) return
+                if (fresh.playbackState == Player.STATE_ENDED) return
                 report(app, id, fresh)
             }
         })
@@ -165,7 +177,10 @@ object Playback {
         saverJob = main.launch {
             while (isActive) {
                 delay(5_000)
-                if (player === fresh && fresh.isPlaying) report(app, id, fresh)
+                if (player === fresh && fresh.isPlaying) {
+                    report(app, id, fresh)
+                    WatchTime.tick(app)
+                }
             }
         }
     }
@@ -184,6 +199,7 @@ object Playback {
     }
 
     fun close() {
+        appContext?.let { WatchTime.stop(it) }
         saverJob?.cancel()
         saverJob = null
         retireSession()

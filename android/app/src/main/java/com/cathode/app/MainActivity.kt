@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
@@ -45,6 +46,7 @@ import com.cathode.app.data.ServerSettings
 import com.cathode.app.data.StoreLocation
 import com.cathode.app.data.Video
 import com.cathode.app.data.VideoStore
+import com.cathode.app.data.WatchTime
 import com.cathode.app.data.checkHealth
 import com.cathode.app.data.getServerSettings
 import com.cathode.app.data.putServerSettings
@@ -57,6 +59,7 @@ import com.cathode.app.ui.CathodeTheme
 import com.cathode.app.ui.LibraryScreen
 import com.cathode.app.ui.PlayerScreen
 import com.cathode.app.ui.SettingsScreen
+import com.cathode.app.ui.StatsScreen
 import com.cathode.app.ui.SubscriptionsScreen
 import com.cathode.app.ui.formatBytes
 import com.cathode.app.ui.rememberNetState
@@ -293,6 +296,7 @@ class MainActivity : ComponentActivity() {
                 LaunchedEffect(Unit) {
                     withContext(Dispatchers.IO) {
                         Library.load(appContext)
+                        WatchTime.load(appContext)
                         StreamCache.deleteLegacy(appContext)
                     }
                     // Stored prefs, not the composable's blank first-frame defaults.
@@ -354,6 +358,10 @@ class MainActivity : ComponentActivity() {
                             NavigationBarItem(
                                 selected = tab == 2, onClick = { tab = 2 },
                                 icon = { Icon(Icons.Default.PlayArrow, null) }, label = { Text("Playing") },
+                            )
+                            NavigationBarItem(
+                                selected = tab == 4, onClick = { tab = 4 },
+                                icon = { Icon(Icons.Default.BarChart, null) }, label = { Text("Stats") },
                             )
                             NavigationBarItem(
                                 selected = tab == 3, onClick = { tab = 3 },
@@ -431,6 +439,15 @@ class MainActivity : ComponentActivity() {
                                 },
                             )
                             tab == 1 -> SubscriptionsScreen(serverUrl = prefs.serverUrl)
+                            tab == 4 -> StatsScreen(
+                                canRefresh = canUseNetwork,
+                                notice = when {
+                                    prefs.serverUrl.isBlank() -> null
+                                    wifiBlocked -> "Waiting for Wi-Fi"
+                                    !net.online -> "Offline"
+                                    else -> null
+                                },
+                            )
                             tab == 3 -> SettingsScreen(
                                 prefs = prefs,
                                 server = server,

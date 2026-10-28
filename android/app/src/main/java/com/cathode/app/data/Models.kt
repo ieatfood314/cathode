@@ -57,3 +57,26 @@ data class ChannelInfo(
     val title: String? = null,
     @SerialName("last_checked") val lastChecked: Long = 0,
 )
+
+/** Time spent playing one video on one day (see WatchTime). */
+@Serializable
+data class WatchSession(
+    val id: String,
+    val videoId: String,
+    val day: String, // local date, YYYY-MM-DD
+    val seconds: Double = 0.0,
+    val channel: String? = null,
+    // How much of [seconds] the server has confirmed. Phone-only.
+    val sent: Double = 0.0,
+)
+
+@Serializable
+data class StatsRow(val day: String, val channel: String = "", val seconds: Double = 0.0)
+
+@Serializable
+data class StatsResponse(
+    val since: String = "",
+    val rows: List<StatsRow> = emptyList(),
+    @SerialName("total_seconds") val totalSeconds: Double = 0.0,
+    @SerialName("first_day") val firstDay: String? = null,
+)

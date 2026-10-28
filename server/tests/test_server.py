@@ -791,3 +791,56 @@ def test_changing_retention_retries_skipped(tmp_path, monkeypatch):
     conn = dbmod.connect(db_path)
     assert conn.execute("SELECT status FROM videos WHERE id='skip0000001'").fetchone()["status"] == "pending"
     conn.close()
+
+
+def test_watch_time_roundtrip(tmp_path, monkeypatch):
+    """Sessions carry running totals: the larger one wins, so a resent or
+    replayed batch never double-counts. Stats group by day and channel."""
+    from fastapi.testclient import TestClient
+    from app import db as dbmod
+    from app.main import app
+    _, db_path = _isolated(tmp_path, monkeypatch)
+    conn = dbmod.connect(db_path)
+    conn.execute("INSERT INTO videos(id,channel_title,status,file_path) "
+                 "VALUES('wt000000001','Chan A','done','a.mp4')")
+    conn.commit()
+    conn.close()
+    c = TestClient(app)
+
+    def post(*sessions):
+        return c.post("/api/watchtime", json={"sessions": list(sessions)}).json()
+
+    s1 = {"id": "s1", "video_id": "wt000000001", "day": "2026-10-27", "seconds": 600}
+    assert post(s1)["stored"] == 1
+    # Resent with an older (smaller) total: kept at the larger.
+    post({**s1, "seconds": 300})
+    # Grown since: updated, not added.
+    post({**s1, "seconds": 900})
+    # A pruned video keeps the channel the phone sent.
+    post({"id": "s2", "video_id": "gone0000001", "day": "2026-10-28",
+          "seconds": 120, "channel": "Chan B"})
+    # Malformed entries are dropped without failing the rest.
+    r = post({"id": "", "day": "2026-10-28", "seconds": 5},
+             {"id": "s3", "day": "yesterday", "seconds": 5},
+             {"id": "s4", "video_id": "wt000000001", "day": "2026-10-28", "seconds": 60})
+    assert r["stored"] == 1
+
+    stats = c.get("/api/stats?since=2026-10-01").json()
+    rows = {(r["day"], r["channel"]): r["seconds"] for r in stats["rows"]}
+    assert rows == {("2026-10-27", "Chan A"): 900, ("2026-10-28", "Chan B"): 120,
+                    ("2026-10-28", "Chan A"): 60}
+    assert stats["total_seconds"] == 1080
+    assert stats["first_day"] == "2026-10-27"
+    # The window only limits rows; the total is all-time.
+    later = c.get("/api/stats?since=2026-10-28").json()
+    assert {r["day"] for r in later["rows"]} == {"2026-10-28"}
+    assert later["total_seconds"] == 1080
+    assert c.get("/api/stats?since=last-week").status_code == 400
+
+
+def test_stats_empty(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+    from app.main import app
+    _isolated(tmp_path, monkeypatch)
+    stats = TestClient(app).get("/api/stats").json()
+    assert stats["rows"] == [] and stats["total_seconds"] == 0 and stats["first_day"] is None

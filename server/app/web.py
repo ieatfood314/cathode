@@ -21,6 +21,7 @@ button, select, input { background: #1a1a22; color: #eee; border: 1px solid #333
 button { cursor: pointer; }
 button:hover { border-color: #8b7cff; }
 #status { color: #5eead4; font-size: .85rem; }
+#watch { color: #999; font-size: .85rem; margin: -4px 0 12px; }
 #grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; margin-top: 12px; }
 .card { background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.12); border-radius: 16px; padding: 10px; cursor: pointer; }
 .card img { width: 100%; border-radius: 10px; aspect-ratio: 16/9; object-fit: cover; background: #111; }
@@ -37,6 +38,7 @@ button:hover { border-color: #8b7cff; }
 </head>
 <body>
 <h1>Cathode</h1>
+<div id="watch"></div>
 <div id="player">
   <video id="vid" controls preload="none"></video>
   <div class="bar" style="margin-top:8px">
@@ -98,6 +100,7 @@ async function load() {
       g.appendChild(d);
     }
     $('status').textContent = feed.videos.length + ' videos';
+    loadWatch();
   } catch (e) { $('status').textContent = 'failed: ' + e.message; }
 }
 function play(v) {
@@ -112,7 +115,7 @@ function play(v) {
   $('vid').play().catch(() => {});
   window.scrollTo(0, 0);
 }
-function closePlayer() { if (current) saveProgress(); $('vid').pause(); $('vid').removeAttribute('src'); $('player').style.display = 'none'; }
+function closePlayer() { if (current) saveProgress(); wtStop(); $('vid').pause(); $('vid').removeAttribute('src'); $('player').style.display = 'none'; }
 let lastSave = 0;
 function saveProgress() {
   if (!current || !$('vid').src) return;
@@ -121,6 +124,56 @@ function saveProgress() {
   current.position_seconds = p;
 }
 setInterval(() => { const v = $('vid'); if (current && !v.paused && !v.ended && Date.now() - lastSave > 10000) { lastSave = Date.now(); saveProgress(); } }, 2000);
+// Watch time (Stats): wall-clock time the video is actually playing. One
+// session per video per day; the server keeps the larger running total.
+let wt = null, wtSent = 0;
+function localDay(d = new Date()) {
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+function wtAccrue() {
+  if (!wt || wt.mark == null) return;
+  const now = performance.now();
+  wt.seconds += Math.min(60, Math.max(0, (now - wt.mark) / 1000));
+  wt.mark = now;
+}
+function wtSend() {
+  if (!wt || wt.seconds <= 0) return;
+  wtSent = Date.now();
+  const s = {id: wt.id, video_id: wt.video_id, day: wt.day, seconds: wt.seconds};
+  fetch('/api/watchtime', {method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({sessions: [s]}), keepalive: true}).catch(() => {});
+}
+function wtStart() {
+  if (!current) return;
+  const day = localDay();
+  if (!wt || wt.video_id !== current.id || wt.day !== day) {
+    wtStop();
+    wt = {id: Date.now().toString(36) + Math.random().toString(36).slice(2), video_id: current.id, day, seconds: 0, mark: null};
+  }
+  wt.mark = performance.now();
+}
+function wtStop() { wtAccrue(); if (wt) wt.mark = null; wtSend(); }
+setInterval(() => {
+  if (!wt || wt.mark == null) return;
+  if (wt.day !== localDay()) { wtStop(); wtStart(); return; }  // past midnight
+  wtAccrue();
+  if (Date.now() - wtSent > 30000) wtSend();
+}, 5000);
+function fmtWatch(s) {
+  const m = Math.floor(s / 60);
+  return m >= 60 ? Math.floor(m / 60) + 'h ' + (m % 60) + 'm' : m + 'm';
+}
+async function loadWatch() {
+  try {
+    const now = new Date(), since = new Date(now);
+    since.setDate(now.getDate() - 6);
+    const st = await api('/api/stats?since=' + localDay(since));
+    const today = localDay(now);
+    let t = 0, w = 0;
+    for (const r of st.rows) { w += r.seconds; if (r.day === today) t += r.seconds; }
+    $('watch').textContent = 'Watched today ' + fmtWatch(t) + '  ·  7 days ' + fmtWatch(w);
+  } catch (e) {}
+}
 async function markWatched(w) {
   if (!current) return;
   await fetch('/api/videos/' + current.id + '/watched?watched=' + w, {method: 'POST'});
@@ -162,9 +215,11 @@ async function saveSettings() {
   } catch (e) { $('s_status').textContent = 'save failed: ' + e.message; }
 }
 $('vid').addEventListener('pause', saveProgress);
-window.addEventListener('pagehide', () => { if (current) saveProgress(); });
+$('vid').addEventListener('playing', wtStart);
+for (const ev of ['pause', 'waiting', 'ended']) $('vid').addEventListener(ev, wtStop);
+window.addEventListener('pagehide', () => { if (current) saveProgress(); wtStop(); });
 $('unwatched').onchange = load;
-load(); loadSettings();
+load(); loadSettings(); loadWatch();
 </script>
 </body>
 </html>

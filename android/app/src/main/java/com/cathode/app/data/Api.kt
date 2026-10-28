@@ -3,6 +3,7 @@ package com.cathode.app.data
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
@@ -125,6 +126,43 @@ fun setWatched(baseUrl: String, videoId: String, watched: Boolean) {
     ).execute().use { resp ->
         if (!resp.isSuccessful) throw HttpStatusException(resp.code, "watched HTTP ${resp.code}")
     }
+}
+
+@Serializable
+private data class SessionOut(
+    val id: String,
+    @SerialName("video_id") val videoId: String,
+    val day: String,
+    val seconds: Double,
+    val channel: String? = null,
+)
+
+@Serializable
+private data class SessionBatch(val sessions: List<SessionOut>)
+
+/** Send watch-time running totals (the server keeps the larger of old and
+ *  new, so resending is harmless). Throws when the server didn't take them. */
+fun postWatchTime(baseUrl: String, sessions: List<WatchSession>) {
+    val batch = SessionBatch(sessions.map { SessionOut(it.id, it.videoId, it.day, it.seconds, it.channel) })
+    val body = json.encodeToString(SessionBatch.serializer(), batch)
+        .toRequestBody("application/json".toMediaType())
+    baseClient().newCall(
+        Request.Builder().url("$baseUrl/api/watchtime").post(body).build()
+    ).execute().use { resp ->
+        if (!resp.isSuccessful) throw HttpStatusException(resp.code, "watchtime HTTP ${resp.code}")
+    }
+}
+
+/** Watch time per day and channel from [since] (YYYY-MM-DD), plus the all-time total. */
+fun fetchStats(baseUrl: String, since: String): StatsResponse {
+    baseClient().newCall(Request.Builder().url("$baseUrl/api/stats?since=$since").build())
+        .execute().use { resp ->
+            if (!resp.isSuccessful) throw HttpStatusException(resp.code, "stats HTTP ${resp.code}")
+            return json.decodeFromString(
+                StatsResponse.serializer(),
+                resp.body?.string().orEmpty().ifEmpty { "{}" },
+            )
+        }
 }
 
 fun triggerServerPoll(baseUrl: String): String {
