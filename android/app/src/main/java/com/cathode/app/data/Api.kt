@@ -74,6 +74,20 @@ fun requireWifiIfEnabled(context: Context, wifiOnly: Boolean) {
 
 class WifiBlockedException(msg: String) : IllegalStateException(msg)
 
+/** The download was asked to stop (background job ended); its partial stays for the next run. */
+class DownloadStopped : IllegalStateException("download stopped")
+
+/** Backoff between attempts that still gives up the moment [stop] says so. */
+private fun pause(ms: Long, stop: () -> Boolean) {
+    val end = System.currentTimeMillis() + ms
+    while (true) {
+        if (stop()) throw DownloadStopped()
+        val left = end - System.currentTimeMillis()
+        if (left <= 0) return
+        Thread.sleep(minOf(250L, left))
+    }
+}
+
 fun fetchFeed(baseUrl: String, unwatchedOnly: Boolean = false): List<Video> =
     try {
         fetchFeedPage(baseUrl, 2000, unwatchedOnly)
@@ -272,6 +286,7 @@ fun downloadResumable(
     wifiOnly: Boolean,
     onProgress: (bytesDone: Long, total: Long) -> Unit = { _, _ -> },
     maxAttempts: Int = 8,
+    stop: () -> Boolean = { false },
 ): File {
     val part = File(dest.path + ".part")
     val client = baseClient()
@@ -279,6 +294,7 @@ fun downloadResumable(
     var backoffMs = 1_000L
     while (true) {
         attempt++
+        if (stop()) throw DownloadStopped()
         requireWifiIfEnabled(context, wifiOnly)
         val done = if (part.exists()) part.length() else 0L
         val req = Request.Builder().url(url).apply {
@@ -311,6 +327,7 @@ fun downloadResumable(
                     val buf = ByteArray(64 * 1024)
                     var count = done
                     while (true) {
+                        if (stop()) throw DownloadStopped()
                         requireWifiIfEnabled(context, wifiOnly)
                         val n = body.byteStream().read(buf)
                         if (n < 0) break
@@ -323,14 +340,16 @@ fun downloadResumable(
                 return dest
             }
             if (rangeIgnored) {
-                Thread.sleep(backoffMs)
+                pause(backoffMs, stop)
                 backoffMs = (backoffMs * 2).coerceAtMost(60_000L)
             }
         } catch (e: WifiBlockedException) {
             throw e // do not retry on metered networks; WorkManager will reschedule on UNMETERED
+        } catch (e: DownloadStopped) {
+            throw e
         } catch (e: Exception) {
             if (attempt >= maxAttempts) throw e
-            Thread.sleep(backoffMs)
+            pause(backoffMs, stop)
             backoffMs = (backoffMs * 2).coerceAtMost(60_000L)
         }
     }
@@ -351,12 +370,14 @@ fun downloadResumableStream(
     onProgress: (bytesDone: Long, total: Long) -> Unit = { _, _ -> },
     maxAttempts: Int = 8,
     onRangeIgnored: () -> Unit = {},
+    stop: () -> Boolean = { false },
 ) {
     val client = baseClient()
     var attempt = 0
     var backoffMs = 1_000L
     while (true) {
         attempt++
+        if (stop()) throw DownloadStopped()
         requireWifiIfEnabled(context, wifiOnly)
         val done = existingBytes()
         val req = Request.Builder().url(url).apply {
@@ -381,6 +402,7 @@ fun downloadResumableStream(
                     val buf = ByteArray(64 * 1024)
                     var count = done
                     while (true) {
+                        if (stop()) throw DownloadStopped()
                         requireWifiIfEnabled(context, wifiOnly)
                         val n = body.byteStream().read(buf)
                         if (n < 0) break
@@ -393,15 +415,17 @@ fun downloadResumableStream(
             }
         } catch (e: WifiBlockedException) {
             throw e
+        } catch (e: DownloadStopped) {
+            throw e
         } catch (e: RangeIgnoredException) {
             // Server ignored Range: drop the partial so the retry starts at zero.
             runCatching { onRangeIgnored() }
             if (attempt >= maxAttempts) throw IllegalStateException("server ignores resume")
-            Thread.sleep(backoffMs)
+            pause(backoffMs, stop)
             backoffMs = (backoffMs * 2).coerceAtMost(60_000L)
         } catch (e: Exception) {
             if (attempt >= maxAttempts) throw e
-            Thread.sleep(backoffMs)
+            pause(backoffMs, stop)
             backoffMs = (backoffMs * 2).coerceAtMost(60_000L)
         }
     }

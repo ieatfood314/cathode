@@ -63,6 +63,7 @@ import com.cathode.app.ui.StatsScreen
 import com.cathode.app.ui.SubscriptionsScreen
 import com.cathode.app.ui.formatBytes
 import com.cathode.app.ui.rememberNetState
+import com.cathode.app.worker.DownloadWorker
 import com.cathode.app.worker.SyncWorker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
@@ -145,13 +146,11 @@ class MainActivity : ComponentActivity() {
                     withContext(Dispatchers.Main) { updatePhoneSummary(n, b, cache) }
                 }
 
+                // Queued in the background (waits for Wi-Fi if needed) and
+                // keeps going after the app closes.
                 fun saveVideo(v: Video) {
-                    if (!prefs.saveOnPhone || !canUseNetwork) return
-                    val url = streamUrl(v)
-                    val wifiOnly = prefs.wifiOnly
-                    scope.launch(Dispatchers.IO) {
-                        OfflineRepo.save(appContext, store, v, url, wifiOnly)
-                    }
+                    if (!prefs.saveOnPhone) return
+                    DownloadWorker.save(appContext, listOf(v.id), prefs.wifiOnly)
                 }
 
                 // Offline or unreachable, the library shown is the one cached
@@ -172,28 +171,8 @@ class MainActivity : ComponentActivity() {
                             syncError = if (result.isSuccess) null
                             else syncFailureMessage(result.exceptionOrNull())
                         }
-                        val feed = result.getOrNull()
-                        val keepDays = feed?.let {
-                            runCatching { getServerSettings(p.serverUrl).keepDays }.getOrNull()
-                        }
-                        if (feed != null && keepDays != null) {
-                            // Never pull a copy out from under the player.
-                            val expired = Library.expired(feed, keepDays) - setOfNotNull(Playback.videoId)
-                            expired.forEach { OfflineRepo.remove(appContext, loc, it) }
-                            if (expired.isNotEmpty()) {
-                                Library.forget(appContext, expired)
-                                rescanPhone(loc)
-                            }
-                        }
-                        if (feed != null && p.saveOnPhone && p.autoSaveNew) {
-                            OfflineRepo.autoSaveNew(
-                                appContext, loc, feed,
-                                baseline = prefsRepo.flow.first().autoSaveBaseline,
-                                wifiOnly = p.wifiOnly,
-                                streamUrl = { v -> "${p.serverUrl}/api/videos/${v.id}/stream" },
-                                setBaseline = { prefsRepo.setBaseline(it) },
-                            )
-                        }
+                        val feed = result.getOrNull() ?: return@launch
+                        if (SyncWorker.afterSync(appContext, feed, p) > 0) rescanPhone(loc)
                     }
                 }
 
@@ -315,6 +294,14 @@ class MainActivity : ComponentActivity() {
                 // Load full server config whenever the Settings tab opens.
                 LaunchedEffect(tab) {
                     if (tab == 3) loadServer()
+                }
+                // Saves land from the background queue too: keep the storage
+                // summary in step with what's on the phone.
+                LaunchedEffect(savedIds) {
+                    val cache = withContext(Dispatchers.IO) {
+                        runCatching { StreamCache.get(appContext).cacheSpace }.getOrDefault(0L)
+                    }
+                    updatePhoneSummary(OfflineRepo.savedCount(), OfflineRepo.savedBytes(), cache)
                 }
                 LaunchedEffect(showPlayerRequests.intValue) {
                     if (showPlayerRequests.intValue == 0) return@LaunchedEffect

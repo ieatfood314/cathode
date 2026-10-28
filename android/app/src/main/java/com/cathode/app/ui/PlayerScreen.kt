@@ -226,11 +226,12 @@ fun PlayerScreen(
                 Gap(4)
                 val status = when {
                     saveState is SaveState.Saving -> "Saving ${(saveState.fraction * 100).toInt()}%"
+                    saveState is SaveState.Queued -> "Queued"
                     savedUri != null -> "On phone"
                     else -> null
                 }
                 Text(
-                    listOfNotNull(video.channelTitle, status).joinToString("  ·  "),
+                    listOfNotNull(video.channelTitle, uploadedLabel(video), status).joinToString("  ·  "),
                     style = MaterialTheme.typography.bodyMedium, color = Muted,
                 )
             }

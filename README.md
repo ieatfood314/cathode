@@ -50,6 +50,8 @@ offline sync there).
 
 OLED black (`#000000`), flat panels, one violet accent. Bottom nav: Library / Channels / Playing / Stats / Settings.
 
+**Saving to the phone** runs in the background: new uploads are saved after every sync (including the phone's own background sync), and a tapped **Save to phone** keeps going after you close the app. Each library row shows the channel and when the video was uploaded. For saves to run to the end with a progress notification, turn on Settings → **Background downloads** → Allow (this lifts Android's battery optimization for Cathode). Without that, Android stops a background save after about 10 minutes, and it resumes from the same spot next time.
+
 **Stats** shows how long you've actually spent watching: today, the last 7 days, a daily average, all time, a two-week chart and your top channels. Only time spent playing counts (not paused or buffering), and time watched offline is added once the phone is back on Wi-Fi. The web UI's player counts too.
 
 **Install via [Obtainium](https://apps.obtainium.imranr.dev/)** (update tracking, no store needed): add app → source GitHub → `https://github.com/ieatfood314/cathode` — it picks up each release APK automatically. Or download the APK from the [releases page](../../releases) and install directly.

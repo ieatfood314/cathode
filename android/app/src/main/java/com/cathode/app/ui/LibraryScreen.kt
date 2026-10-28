@@ -55,6 +55,11 @@ import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.cathode.app.data.SaveState
 import com.cathode.app.data.Video
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
+import java.time.temporal.ChronoUnit
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -216,6 +221,7 @@ private fun VideoRow(
                     Text(
                         when (state) {
                             is SaveState.Saving -> "Saving ${(state.fraction * 100).toInt()}%"
+                            is SaveState.Queued -> "Queued"
                             is SaveState.Failed -> "Save failed"
                             else -> v.channelTitle.orEmpty()
                         },
@@ -227,7 +233,16 @@ private fun VideoRow(
                             is SaveState.Failed -> MaterialTheme.colorScheme.error
                             else -> Muted
                         },
+                        // A long channel name shortens, the date stays whole.
+                        modifier = Modifier.weight(1f, fill = false),
                     )
+                    val uploaded = uploadedLabel(v)
+                    if (uploaded != null) {
+                        Text(
+                            " · $uploaded", maxLines = 1,
+                            style = MaterialTheme.typography.bodySmall, color = Muted,
+                        )
+                    }
                 }
             }
         }
@@ -259,7 +274,7 @@ private fun VideoRow(
                     leadingIcon = { Icon(Icons.Default.Delete, null) },
                     onClick = { pick { onRemoveSaved(v) } },
                 )
-                is SaveState.Saving -> Unit
+                is SaveState.Saving, is SaveState.Queued -> Unit
                 else -> DropdownMenuItem(
                     text = { Text("Save to phone") },
                     leadingIcon = { Icon(Icons.Default.Download, null) },
@@ -320,6 +335,35 @@ private fun Thumbnail(v: Video, thumb: String) {
                 Box(Modifier.fillMaxWidth(fraction).fillMaxHeight().background(Accent))
             }
         }
+    }
+}
+
+/**
+ * When it went up: "42 min ago", "5 hours ago", "Yesterday", "3 days ago",
+ * then the date. Uses the exact upload time when the server has it, else
+ * the upload day.
+ */
+fun uploadedLabel(v: Video, now: ZonedDateTime = ZonedDateTime.now()): String? {
+    if (v.published > 0) {
+        val mins = (now.toEpochSecond() - v.published) / 60
+        when {
+            mins < 1 -> return "Just now"
+            mins < 60 -> return "$mins min ago"
+            mins < 24 * 60 -> return (mins / 60).let { if (it == 1L) "1 hour ago" else "$it hours ago" }
+        }
+    }
+    val day = if (v.published > 0) Instant.ofEpochSecond(v.published).atZone(now.zone).toLocalDate()
+    else v.uploadDate?.takeIf { it.length == 8 }
+        ?.let { runCatching { LocalDate.parse(it, DateTimeFormatter.BASIC_ISO_DATE) }.getOrNull() }
+        ?: return null
+    val today = now.toLocalDate()
+    val days = ChronoUnit.DAYS.between(day, today)
+    return when {
+        days <= 0 -> "Today"
+        days == 1L -> "Yesterday"
+        days < 7 -> "$days days ago"
+        day.year == today.year -> day.format(DateTimeFormatter.ofPattern("MMM d"))
+        else -> day.format(DateTimeFormatter.ofPattern("MMM d, yyyy"))
     }
 }
 

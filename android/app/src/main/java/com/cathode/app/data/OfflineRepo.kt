@@ -5,13 +5,14 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import java.util.Collections
-import java.util.concurrent.atomic.AtomicBoolean
 
 private const val PART_MIME = "application/octet-stream"
 
 /** Phone-copy state for one video. */
 sealed interface SaveState {
     data object NotSaved : SaveState
+    /** Waiting its turn in the background download queue (or for Wi-Fi). */
+    data object Queued : SaveState
     data class Saving(val fraction: Float) : SaveState
     data object Saved : SaveState
     data object Failed : SaveState
@@ -33,9 +34,8 @@ object OfflineRepo {
     /** Ids found in the storage folder by the last scan (saved in any session). */
     val scanned: StateFlow<Set<String>> = _scanned
     private val _scannedBytes = MutableStateFlow(0L)
-    // Two saves of one video (auto-save + a tap) would write the same partial.
+    // Two saves of one video (a stopped job's last read + its rerun) would write the same partial.
     private val inFlight: MutableSet<String> = Collections.synchronizedSet(mutableSetOf())
-    private val autoSaveRunning = AtomicBoolean(false)
 
     fun stateOf(videoId: String): SaveState =
         _states.value[videoId] ?: if (videoId in _scanned.value) SaveState.Saved
@@ -44,95 +44,95 @@ object OfflineRepo {
     /** Re-scan the folder. Returns (count, bytes). */
     fun rescan(context: Context, loc: StoreLocation): Pair<Int, Long> {
         val found = runCatching { VideoStore.listSaved(context, loc) }.getOrDefault(emptyList())
-        _scanned.value = found.map { it.videoId }.toSet()
+        // Bytes first: watchers of [scanned] read the total right after.
         _scannedBytes.value = found.sumOf { it.bytes }
+        _scanned.value = found.map { it.videoId }.toSet()
         return found.size to found.sumOf { it.bytes }
     }
 
     fun savedBytes(): Long = _scannedBytes.value
     fun savedCount(): Int = _scanned.value.size
 
-    /** Download one video to the phone. Returns false on failure or when it's already downloading. */
-    fun save(context: Context, loc: StoreLocation, v: Video, streamUrl: String, wifiOnly: Boolean): Boolean {
-        if (stateOf(v.id) is SaveState.Saved) return true
-        if (!inFlight.add(v.id)) return false
+    /** Show these as waiting for the background download queue. */
+    fun markQueued(ids: Collection<String>) {
+        _states.update { m ->
+            m + ids.filter { stateOf(it) !is SaveState.Saved && m[it] !is SaveState.Saving }
+                .associateWith { SaveState.Queued }
+        }
+    }
+
+    /**
+     * Download one video to the phone (blocking; DownloadWorker runs it).
+     * Returns the state it ends in: Saved, Failed, or Queued when it was
+     * stopped or lost Wi-Fi — its partial stays and the next run resumes it.
+     */
+    fun save(
+        context: Context, loc: StoreLocation, v: Video, streamUrl: String, wifiOnly: Boolean,
+        stop: () -> Boolean = { false },
+    ): SaveState {
+        if (stateOf(v.id) is SaveState.Saved) return SaveState.Saved
+        if (!inFlight.add(v.id)) return stateOf(v.id)
         _states.update { it + (v.id to SaveState.Saving(0f)) }
-        val ok = try {
+        val result = try {
             runCatching {
                 when (loc) {
-                    is StoreLocation.DefaultMovies -> saveMediaStore(context, v, streamUrl, wifiOnly)
-                    is StoreLocation.CustomFolder -> saveSaf(context, loc, v, streamUrl, wifiOnly)
+                    is StoreLocation.DefaultMovies -> saveMediaStore(context, v, streamUrl, wifiOnly, stop)
+                    is StoreLocation.CustomFolder -> saveSaf(context, loc, v, streamUrl, wifiOnly, stop)
                 }
-                true
-            }.getOrDefault(false)
+                SaveState.Saved
+            }.getOrElse { e ->
+                if (e is DownloadStopped || e is WifiBlockedException) SaveState.Queued else SaveState.Failed
+            }
         } finally {
             inFlight.remove(v.id)
         }
-        if (ok) {
+        if (result is SaveState.Saved) {
             _scanned.update { it + v.id }
-            _states.update { it + (v.id to SaveState.Saved) }
             rescan(context, loc)
-        } else {
-            _states.update { it + (v.id to SaveState.Failed) }
         }
-        return ok
+        _states.update { it + (v.id to result) }
+        return result
     }
 
-    private fun progress(id: String): (Long, Long) -> Unit = { done, total ->
-        val f = if (total > 0) (done.toFloat() / total).coerceIn(0f, 1f) else 0f
-        _states.update { it + (id to SaveState.Saving(f)) }
+    // Whole percents only: a byte-level update per 64 KB chunk redrew the
+    // library tens of thousands of times for one big video.
+    private fun progress(id: String): (Long, Long) -> Unit {
+        var last = -1
+        return { done, total ->
+            val pct = if (total > 0) (done * 100 / total).toInt().coerceIn(0, 100) else 0
+            if (pct != last) {
+                last = pct
+                _states.update { it + (id to SaveState.Saving(pct / 100f)) }
+            }
+        }
     }
 
-    private fun saveMediaStore(context: Context, v: Video, streamUrl: String, wifiOnly: Boolean) {
+    private fun saveMediaStore(
+        context: Context, v: Video, streamUrl: String, wifiOnly: Boolean, stop: () -> Boolean,
+    ) {
         // Partial lives in cache and survives a failed attempt (Wi-Fi gone,
         // server down), so the next try resumes instead of starting over.
         // The finished file is published to Movies/Cathode as one copy.
         val dest = VideoStore.scratchPart(context, v.id)
         if (!dest.exists()) {
-            downloadResumable(context, streamUrl, dest, wifiOnly, onProgress = progress(v.id))
+            downloadResumable(context, streamUrl, dest, wifiOnly, onProgress = progress(v.id), stop = stop)
         }
         VideoStore.publishToMediaStore(context, v, dest)
         dest.delete()
     }
 
     /**
-     * Save new arrivals (the app does this after each successful sync). The
-     * baseline is the newest server download time already handled: the first
-     * run only sets it (no surprise mass download), and a failed save holds
-     * the baseline just below itself so it's retried next time. One run at a
-     * time — overlapping syncs would start the same downloads twice.
+     * New arrivals auto-save should fetch, oldest first. The baseline is the
+     * newest server download time already handled (see DownloadWorker); only
+     * unwatched videos that aren't on the phone yet count.
      */
-    suspend fun autoSaveNew(
-        context: Context,
-        loc: StoreLocation,
-        feed: List<Video>,
-        baseline: Long,
-        wifiOnly: Boolean,
-        streamUrl: (Video) -> String,
-        setBaseline: suspend (Long) -> Unit,
-    ) {
-        if (!autoSaveRunning.compareAndSet(false, true)) return
-        try {
-            val newest = feed.maxOfOrNull { it.downloadedAt } ?: return
-            if (baseline <= 0L) {
-                setBaseline(newest)
-                return
-            }
-            var next = maxOf(baseline, newest)
-            feed.filter { it.downloadedAt > baseline && it.watched == 0 && stateOf(it.id) !is SaveState.Saved }
-                .sortedBy { it.downloadedAt }
-                .forEach { v ->
-                    save(context, loc, v, streamUrl(v), wifiOnly)
-                    if (stateOf(v.id) is SaveState.Failed) next = minOf(next, v.downloadedAt - 1)
-                }
-            setBaseline(next)
-        } finally {
-            autoSaveRunning.set(false)
-        }
-    }
+    fun autoSavePicks(feed: List<Video>, baseline: Long): List<Video> =
+        feed.filter { it.downloadedAt > baseline && it.watched == 0 && stateOf(it.id) !is SaveState.Saved }
+            .sortedBy { it.downloadedAt }
 
     private fun saveSaf(
         context: Context, loc: StoreLocation.CustomFolder, v: Video, streamUrl: String, wifiOnly: Boolean,
+        stop: () -> Boolean,
     ) {
         val dir = VideoStore.safDir(context, loc, v)
             ?: throw IllegalStateException("cannot open chosen folder")
@@ -149,6 +149,7 @@ object OfflineRepo {
             existingBytes = { part.length() },
             openSink = { VideoStore.openSafAppend(context, part.uri) },
             onProgress = progress(v.id),
+            stop = stop,
             onRangeIgnored = {
                 part.delete()
                 part = dir.createFile(PART_MIME, partName)

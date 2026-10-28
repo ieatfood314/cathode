@@ -83,6 +83,30 @@ function fmtDur(s) {
   return h ? h + ':' + String(m).padStart(2, '0') + ':' + String(sec).padStart(2, '0')
            : m + ':' + String(sec).padStart(2, '0');
 }
+// When it went up, like the app: "5 hours ago", "Yesterday", then the date.
+function fmtAgo(v) {
+  if (v.published > 0) {
+    const m = Math.floor((Date.now() / 1000 - v.published) / 60);
+    if (m < 1) return 'Just now';
+    if (m < 60) return m + ' min ago';
+    if (m < 1440) { const h = Math.floor(m / 60); return h + (h === 1 ? ' hour ago' : ' hours ago'); }
+  }
+  let d;
+  if (v.published > 0) d = new Date(v.published * 1000);
+  else if (/^[0-9]{8}$/.test(v.upload_date || '')) {
+    const u = v.upload_date;
+    d = new Date(+u.slice(0, 4), +u.slice(4, 6) - 1, +u.slice(6, 8));
+  } else return '';
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const day = new Date(d); day.setHours(0, 0, 0, 0);
+  const days = Math.round((today - day) / 86400000);
+  if (days <= 0) return 'Today';
+  if (days === 1) return 'Yesterday';
+  if (days < 7) return days + ' days ago';
+  const opts = {month: 'short', day: 'numeric'};
+  if (d.getFullYear() !== today.getFullYear()) opts.year = 'numeric';
+  return d.toLocaleDateString(undefined, opts);
+}
 async function load() {
   $('status').textContent = 'loading…';
   try {
@@ -95,7 +119,7 @@ async function load() {
       d.innerHTML = '<img loading="lazy" src="/api/thumbs/' + v.id + '" onerror="this.remove()">' +
         '<div class="t"></div><div class="m"></div>';
       d.querySelector('.t').textContent = v.title || v.id;
-      d.querySelector('.m').textContent = (v.channel_title || '') + '  •  ' + fmtDur(v.duration);
+      d.querySelector('.m').textContent = [v.channel_title, fmtAgo(v), fmtDur(v.duration)].filter(Boolean).join('  •  ');
       d.onclick = () => play(v);
       g.appendChild(d);
     }

@@ -1,5 +1,12 @@
 package com.cathode.app.ui
 
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Build
+import android.os.PowerManager
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -41,6 +48,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import com.cathode.app.data.AppPrefs
 import com.cathode.app.data.ServerSettings
 import com.cathode.app.data.VideoStore
@@ -170,6 +178,10 @@ fun SettingsScreen(
             }
             SwitchRow("Save new videos automatically", null, prefs.autoSaveNew, enabled = prefs.saveOnPhone) { on ->
                 onPrefs { it.copy(autoSaveNew = on) }
+            }
+            if (prefs.saveOnPhone) {
+                RowDivider()
+                BackgroundRow()
             }
             RowDivider()
             AfterWatchingRow(
@@ -347,6 +359,50 @@ private fun AfterWatchingRow(phone: Boolean, server: Boolean?, onPick: (AfterWat
         // The server half can only change while the server is reachable.
         val enabled = server != null || mode != AfterWatching.EVERYWHERE
         RadioRow(mode.label, mode == current, enabled) { onPick(mode) }
+    }
+}
+
+/**
+ * Saves run in the background either way, but while Android's battery
+ * optimization covers the app they're cut off after ~10 minutes and wait
+ * for the next slot. Allowing it lets a save run to the end with a
+ * progress notification (so notifications are asked for too).
+ */
+@Composable
+private fun BackgroundRow() {
+    val context = LocalContext.current
+    val power = remember { context.getSystemService(PowerManager::class.java) }
+    var allowed by remember { mutableStateOf(power.isIgnoringBatteryOptimizations(context.packageName)) }
+    val notifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    val ask = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        allowed = power.isIgnoringBatteryOptimizations(context.packageName)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            notifications.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text("Background downloads")
+            Hint(if (allowed) "On" else "Limited by battery settings")
+        }
+        if (!allowed) {
+            TextButton(onClick = {
+                runCatching {
+                    ask.launch(
+                        Intent(
+                            Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                            Uri.parse("package:${context.packageName}"),
+                        )
+                    )
+                }.onFailure {
+                    // No direct prompt on this phone: open the app list instead.
+                    ask.launch(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+                }
+            }) { Text("Allow") }
+        }
     }
 }
 
