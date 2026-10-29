@@ -28,6 +28,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
@@ -50,6 +51,7 @@ import androidx.media3.ui.PlayerView
 import com.cathode.app.data.SaveState
 import com.cathode.app.data.Video
 import com.cathode.app.player.Playback
+import kotlinx.coroutines.delay
 
 private const val RESUME_WINDOW = 0.95
 
@@ -155,10 +157,24 @@ fun PlayerScreen(
     }
 
     var controlsVisible by remember { mutableStateOf(true) }
+    // Double-tap seek feedback; fades once the follow-up tap window closes.
+    var seekSide by remember { mutableIntStateOf(1) }
+    var seekSeconds by remember { mutableIntStateOf(0) }
+    var seekVisible by remember { mutableStateOf(false) }
+    var seekTick by remember { mutableIntStateOf(0) }
+    LaunchedEffect(seekTick) {
+        delay(SEEK_WINDOW_MS)
+        seekVisible = false
+    }
     // One layout for every mode, so the PlayerView is never torn down by a
     // mode change (only by viewGeneration): portrait = video on top + details
     // below; landscape = video fitted to the height; fullscreen = everything.
     val showDetails = !fullscreen && !landscape
+    val videoModifier = if (landscape && !fullscreen) {
+        Modifier.fillMaxHeight().aspectRatio(16f / 9f, matchHeightConstraintsFirst = true)
+    } else {
+        Modifier.fillMaxSize()
+    }
     Column(
         Modifier
             .fillMaxSize()
@@ -171,9 +187,19 @@ fun PlayerScreen(
             key(viewGeneration) {
                 AndroidView(
                     factory = { ctx ->
-                        PlayerView(ctx).apply {
+                        TapPlayerView(ctx).apply {
                             this.player = player
                             useController = true
+                            onSeek = { dir ->
+                                // Same side while the arc is up adds on; a fresh
+                                // or switched side starts at 10 again.
+                                seekSeconds = if (seekVisible && seekSide == dir) {
+                                    seekSeconds + (SEEK_STEP_MS / 1000).toInt()
+                                } else (SEEK_STEP_MS / 1000).toInt()
+                                seekSide = dir
+                                seekVisible = true
+                                seekTick++
+                            }
                             setFullscreenButtonClickListener { want -> onFullscreenChange(want) }
                             // The close button rides along with the player's own
                             // controls: hidden until you tap the video.
@@ -192,13 +218,10 @@ fun PlayerScreen(
                         view.keepScreenOn = playing
                     },
                     onRelease = { view -> view.player = null },
-                    modifier = if (landscape && !fullscreen) {
-                        Modifier.fillMaxHeight().aspectRatio(16f / 9f, matchHeightConstraintsFirst = true)
-                    } else {
-                        Modifier.fillMaxSize()
-                    },
+                    modifier = videoModifier,
                 )
             }
+            SeekFeedback(seekSide, seekVisible, seekSeconds, videoModifier)
             if (controlsVisible) {
                 IconButton(
                     onClick = onClose,
