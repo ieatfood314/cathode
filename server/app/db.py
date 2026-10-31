@@ -106,7 +106,7 @@ def upsert_video(conn: sqlite3.Connection, row: dict):
 def mark_downloaded(conn: sqlite3.Connection, video_id: str, file_path: str,
                      thumb: str, info: str, filesize: int):
     conn.execute(
-        "UPDATE videos SET status='done', file_path=?, thumb_path=?, info_path=?, "
+        "UPDATE videos SET status='done', error='', file_path=?, thumb_path=?, info_path=?, "
         "filesize=?, downloaded_at=? WHERE id=?",
         (file_path, thumb, info, filesize, int(time.time()), video_id),
     )

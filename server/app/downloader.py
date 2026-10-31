@@ -14,6 +14,11 @@ Thumbnails are written as sidecar .jpg files (for /api/thumbs) but NOT
 embedded into the mp4: --embed-thumbnail adds a cover-art "video" stream
 (mjpeg) to the container, and ExoPlayer picks it as the video track on the
 phone — audio plays, video shows black. Never re-add it.
+
+Streams are only downloaded once they're finished VODs (LIVE_FILTER). A
+stream that is live, upcoming or "post_live" (ended, YouTube still
+processing) only yields the tail of the stream — a 3-hour WAN Show came
+down as its last 2.5 minutes. Those are left for the next scan instead.
 """
 
 import json
@@ -39,7 +44,12 @@ BASE_FLAGS = [
     "--write-info-json",
     "--write-thumbnail",
     "--merge-output-format", "mp4",
+    "--match-filter", "live_status!=?is_live & live_status!=?is_upcoming & live_status!=?post_live",
 ]
+
+# yt-dlp prints this (and exits 0, writing nothing) when --match-filter rejects.
+NOT_READY = "does not pass filter"
+NOT_READY_ERROR = "stream not finished processing yet; retrying next scan"
 
 
 def format_selector(max_res: int) -> str:
@@ -156,6 +166,8 @@ def download_video(video_id: str, media_dir: Path, archive: Path,
         if log:
             tail = (proc.stderr or proc.stdout or "")[-2000:]
             log(f"yt-dlp {video_id} rc={proc.returncode} {tail}")
+        if NOT_READY in (proc.stdout or ""):
+            return False, NOT_READY_ERROR
         return proc.returncode == 0, (proc.stderr or "")[-2000:]
     except subprocess.TimeoutExpired:
         return False, "timeout after 1h"

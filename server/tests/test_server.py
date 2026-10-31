@@ -844,3 +844,26 @@ def test_stats_empty(tmp_path, monkeypatch):
     _isolated(tmp_path, monkeypatch)
     stats = TestClient(app).get("/api/stats").json()
     assert stats["rows"] == [] and stats["total_seconds"] == 0 and stats["first_day"] is None
+
+
+def test_unfinished_streams_wait_for_the_vod(tmp_path, monkeypatch):
+    """A just-ended stream ("post_live") downloads as only its last minutes —
+    a 3h WAN Show came down as 2:30. yt-dlp must reject live/upcoming/
+    post_live, and a rejected stream must be retried, not skipped."""
+    import subprocess
+    import app.downloader as dl
+    from app import db as dbmod
+    cmd = dl.build_download_cmd("https://www.youtube.com/watch?v=x", "/tmp/o", Path("/tmp/a"))
+    filt = cmd[cmd.index("--match-filter") + 1]
+    for status in ("is_live", "is_upcoming", "post_live"):
+        assert status in filt
+    monkeypatch.setattr(dl.subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(
+        a, 0, stdout="[download] AI Is Bursting does not pass filter (...), skipping ..\n", stderr=""))
+    ok, err = dl.download_video("livewan0001", tmp_path, tmp_path / "a.txt")
+    assert not ok and err == dl.NOT_READY_ERROR
+    media, db_path = _isolated(tmp_path, monkeypatch)
+    _scan_one(monkeypatch, media, db_path, "livewan0001", (False, dl.NOT_READY_ERROR))
+    conn = dbmod.connect(db_path)
+    assert conn.execute("SELECT status FROM videos WHERE id='livewan0001'").fetchone()["status"] == "failed"
+    conn.close()
+    assert _scan_one(monkeypatch, media, db_path, "livewan0001", (False, "x")) == ["livewan0001"]
