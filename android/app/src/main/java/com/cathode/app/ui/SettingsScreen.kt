@@ -48,6 +48,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.cathode.app.data.AppPrefs
 import com.cathode.app.data.ServerSettings
@@ -146,13 +147,14 @@ fun SettingsScreen(
     Column(
         Modifier
             .fillMaxSize()
-            .background(Color.Black)
+            .background(Glass)
             .verticalScroll(rememberScrollState())
-            .padding(16.dp)
     ) {
-        ScreenTitle("Settings")
+      ColorBars(height = 3.dp)
+      Column(Modifier.padding(horizontal = 20.dp).padding(top = 18.dp, bottom = 24.dp)) {
+        ScreenTitle("Setup", kicker = "Service menu")
 
-        SectionLabel("Connection")
+        SectionLabel("Antenna")
         Panel {
             ServerUrlField(prefs.serverUrl) { url -> onPrefs { it.copy(serverUrl = url) } }
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -162,7 +164,7 @@ fun SettingsScreen(
                 if (testing) {
                     CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
                 } else if (connStatus != null) {
-                    Hint(connStatus)
+                    Osd(connStatus.uppercase(), size = 18.sp, glow = false)
                 }
             }
             RowDivider()
@@ -171,7 +173,7 @@ fun SettingsScreen(
             }
         }
 
-        SectionLabel("This phone")
+        SectionLabel("This phone", color = BarCyan)
         Panel {
             SwitchRow("Save videos", "Keep copies for offline playback", prefs.saveOnPhone) { on ->
                 onPrefs { it.copy(saveOnPhone = on) }
@@ -211,15 +213,16 @@ fun SettingsScreen(
         }
 
         Row(verticalAlignment = Alignment.Bottom) {
-            SectionLabel("Server")
+            SectionLabel("Station", color = BarYellow)
             Spacer(Modifier.weight(1f))
-            if (serverStatus != null) Hint(serverStatus, Modifier.padding(bottom = 8.dp))
+            if (serverStatus != null) Osd(serverStatus.uppercase(), Modifier.padding(bottom = 10.dp), size = 17.sp, glow = false)
         }
         when {
             server != null -> ServerPanels(server, onServer)
             serverLoading -> CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
             else -> Hint("Connect to a server to change these.")
         }
+      }
     }
 }
 
@@ -280,7 +283,7 @@ private fun ServerPanels(server: ServerSettings, onServer: (ServerSettings) -> U
         Gap(4)
     }
 
-    SectionLabel("SponsorBlock")
+    SectionLabel("SponsorBlock", color = BarMagenta)
     Panel {
         Text("Remove")
         Gap()
@@ -331,6 +334,7 @@ private fun ServerUrlField(stored: String, onCommit: (String) -> Unit) {
         },
         label = { Text("Server address") },
         placeholder = { Text("http://192.168.1.10:8000") },
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
         singleLine = true,
         modifier = Modifier.fillMaxWidth(),
     )
@@ -465,7 +469,7 @@ private fun RowDivider() = HorizontalDivider(
 private fun ValueLabel(label: String, value: String) {
     Row(Modifier.fillMaxWidth()) {
         Text(label, Modifier.weight(1f))
-        Text(value, color = Muted)
+        Osd(value.uppercase(), size = 19.sp, glow = false)
     }
 }
 

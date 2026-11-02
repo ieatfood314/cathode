@@ -7,7 +7,24 @@ import android.net.Uri
 import android.os.Build
 import android.view.WindowManager
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
@@ -37,6 +54,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -68,6 +86,13 @@ fun PlayerScreen(
     onFullscreenChange: (Boolean) -> Unit,
     onClose: () -> Unit,
     onLeave: (positionSeconds: Int) -> Unit,
+    lineup: Lineup = Lineup(emptyList()),
+    // Same channel, not yet watched: what's on after this.
+    upNext: List<Video> = emptyList(),
+    // Other channels' next programs.
+    alsoOnAir: List<Video> = emptyList(),
+    thumbUrl: (Video) -> String = { "" },
+    onOpen: (Video) -> Unit = {},
 ) {
     val context = LocalContext.current
     val activity = context as? Activity
@@ -222,6 +247,7 @@ fun PlayerScreen(
                 )
             }
             SeekFeedback(seekSide, seekVisible, seekSeconds, videoModifier)
+            ChannelFlash(video, lineup, videoModifier)
             if (controlsVisible) {
                 IconButton(
                     onClick = onClose,
@@ -238,26 +264,149 @@ fun PlayerScreen(
             }
         }
         if (showDetails) {
+            ProgramCard(
+                video, lineup, saveState, savedUri != null, upNext, alsoOnAir, thumbUrl, onOpen,
+                Modifier.fillMaxWidth().weight(1f),
+            )
+        }
+    }
+}
+
+/**
+ * The TV's own channel banner: on every new program, the channel number
+ * and name glow in the corner for a few seconds, then fade.
+ */
+@Composable
+private fun ChannelFlash(video: Video, lineup: Lineup, modifier: Modifier) {
+    var visible by remember(video.id) { mutableStateOf(true) }
+    LaunchedEffect(video.id) {
+        delay(2800)
+        visible = false
+    }
+    Box(modifier, contentAlignment = Alignment.TopEnd) {
+        AnimatedVisibility(visible, enter = fadeIn(), exit = fadeOut(tween(700))) {
             Column(
                 Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
-                    .verticalScroll(rememberScrollState())
-                    .padding(16.dp)
+                    .windowInsetsPadding(WindowInsets.displayCutout)
+                    .padding(top = 12.dp, end = 12.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color.Black.copy(alpha = 0.72f))
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                horizontalAlignment = Alignment.End,
             ) {
-                Text(video.title.orEmpty(), style = MaterialTheme.typography.titleMedium)
-                Gap(4)
-                val status = when {
-                    saveState is SaveState.Saving -> "Saving ${(saveState.fraction * 100).toInt()}%"
-                    saveState is SaveState.Queued -> "Queued"
-                    savedUri != null -> "On phone"
-                    else -> null
-                }
-                Text(
-                    listOfNotNull(video.channelTitle, uploadedLabel(video), status).joinToString("  ·  "),
-                    style = MaterialTheme.typography.bodyMedium, color = Muted,
+                Osd("CH ${lineup.label(video.channelTitle)}", size = 40.sp)
+                Osd(video.channelTitle.orEmpty().uppercase(), size = 18.sp)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProgramCard(
+    video: Video,
+    lineup: Lineup,
+    saveState: SaveState,
+    onPhone: Boolean,
+    upNext: List<Video>,
+    alsoOnAir: List<Video>,
+    thumbUrl: (Video) -> String,
+    onOpen: (Video) -> Unit,
+    modifier: Modifier,
+) {
+    val color = channelColor(video.channelTitle)
+    Column(modifier.background(Glass).verticalScroll(rememberScrollState())) {
+        // The channel's color, edge to edge, under the picture.
+        Box(Modifier.fillMaxWidth().height(3.dp).background(color))
+        Column(Modifier.padding(start = 20.dp, end = 20.dp, top = 18.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Osd("CH ${lineup.label(video.channelTitle)}", color = color, size = 22.sp)
+                Spacer(Modifier.width(10.dp))
+                Osd(
+                    video.channelTitle.orEmpty().uppercase(), color = color, size = 22.sp, glow = false,
+                    modifier = Modifier.weight(1f),
                 )
             }
+            Gap(6)
+            Text(video.title.orEmpty(), style = MaterialTheme.typography.titleLarge, color = Ink)
+            Gap(12)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (video.duration > 0) Chip(formatDuration(video.duration))
+                uploadedLabel(video)?.let { Chip(it.uppercase()) }
+                when {
+                    saveState is SaveState.Saving -> Chip("REC ${(saveState.fraction * 100).toInt()}%", Signal)
+                    saveState is SaveState.Queued -> Chip("QUEUED", BarYellow)
+                    onPhone -> Chip("ON PHONE", Phosphor)
+                }
+            }
+        }
+        if (upNext.isNotEmpty()) {
+            SectionLabel(
+                "Later on CH ${lineup.label(video.channelTitle)}",
+                Modifier.padding(horizontal = 20.dp),
+                color = color,
+            )
+            for (v in upNext) UpNextRow(v, thumbUrl(v), color, null) { onOpen(v) }
+        }
+        if (alsoOnAir.isNotEmpty()) {
+            SectionLabel("Also on air", Modifier.padding(horizontal = 20.dp))
+            for (v in alsoOnAir) {
+                UpNextRow(v, thumbUrl(v), channelColor(v.channelTitle), lineup.label(v.channelTitle)) { onOpen(v) }
+            }
+        }
+        Gap(24)
+    }
+}
+
+@Composable
+private fun Chip(text: String, color: Color = Muted) {
+    Box(
+        Modifier
+            .border(1.dp, color.copy(alpha = 0.5f), RoundedCornerShape(6.dp))
+            .padding(horizontal = 8.dp, vertical = 3.dp)
+    ) {
+        Osd(text, color = color, size = 17.sp, glow = false)
+    }
+}
+
+@Composable
+private fun UpNextRow(v: Video, thumb: String, color: Color, channel: String?, onClick: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 20.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier
+                .size(width = 112.dp, height = 63.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(Glass2)
+        ) {
+            AsyncImage(
+                model = thumb, contentDescription = null, contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize().scanlines(0.25f),
+            )
+            val f = watchFraction(v)
+            if (f > 0f) {
+                Box(Modifier.align(Alignment.BottomStart).fillMaxWidth(f).height(3.dp).background(color))
+            }
+        }
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            if (channel != null) {
+                Osd("CH $channel  ${v.channelTitle.orEmpty().uppercase()}", color = color, size = 15.sp, glow = false)
+            }
+            Text(
+                v.title.orEmpty(), style = MaterialTheme.typography.bodyMedium, color = Ink,
+                maxLines = 2, overflow = TextOverflow.Ellipsis,
+            )
+            Gap(2)
+            Osd(
+                listOfNotNull(formatDuration(v.duration).ifEmpty { null }, uploadedLabel(v)?.uppercase())
+                    .joinToString("  ·  "),
+                color = Muted, size = 16.sp, glow = false,
+            )
         }
     }
 }

@@ -5,6 +5,13 @@ import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -62,7 +69,7 @@ private fun originLabel(origin: String) = when (origin) {
  * subscriptions export (Google Takeout CSV, OPML, or a plain .txt list).
  */
 @Composable
-fun SubscriptionsScreen(serverUrl: String) {
+fun SubscriptionsScreen(serverUrl: String, lineup: Lineup = Lineup(emptyList())) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var inputs by remember { mutableStateOf<List<SubInput>>(emptyList()) }
@@ -142,75 +149,105 @@ fun SubscriptionsScreen(serverUrl: String) {
     Column(
         Modifier
             .fillMaxSize()
-            .background(Color.Black)
+            .background(Glass)
             .verticalScroll(rememberScrollState())
-            .padding(16.dp)
     ) {
-        ScreenTitle("Channels")
-        Gap(16)
+        ColorBars(height = 3.dp)
+        Column(Modifier.padding(horizontal = 20.dp).padding(top = 18.dp)) {
+            ScreenTitle("Lineup", kicker = if (inputs.isEmpty()) "Channels" else "${inputs.size} channels")
+            Gap(18)
 
-        if (!ready) {
-            Hint("Set a server address in Settings first.")
-            Gap(16)
-        }
+            if (!ready) {
+                Hint("Set a server address in Setup first.", color = BarYellow)
+                Gap(16)
+            }
 
-        OutlinedTextField(
-            value = newUrl,
-            onValueChange = { newUrl = it },
-            placeholder = { Text("Channel link or @handle") },
-            singleLine = true,
-            enabled = ready,
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-            keyboardActions = KeyboardActions(onDone = { add() }),
-            trailingIcon = {
-                IconButton(onClick = { add() }, enabled = !busy && ready && newUrl.isNotBlank()) {
-                    Icon(Icons.Default.Add, contentDescription = "Add channel")
-                }
-            },
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = { picker.launch("*/*") }, enabled = !busy && ready) {
-                Text("Import file")
-            }
-            IconButton(onClick = { showHelp = true }) {
-                Icon(Icons.Outlined.Info, contentDescription = "How to import", tint = Muted)
-            }
-            if (busy) {
-                CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-            } else if (message != null) {
-                Hint(message!!)
-            }
-        }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            SectionLabel(if (inputs.isEmpty()) "Following" else "Following · ${inputs.size}")
-            Spacer(Modifier.weight(1f))
-            if (loading) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-        }
-        if (inputs.isEmpty() && !loading) Hint("No channels yet.")
-        for (s in inputs) {
-            Row(
-                Modifier.fillMaxWidth().heightIn(min = 56.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text(s.title ?: titles[s.sourceUrl] ?: s.channelId ?: s.sourceUrl)
-                    originLabel(s.origin)?.let { Hint(it) }
-                }
-                // Imported channels come and go with their file.
-                if (s.origin == "manual") {
-                    IconButton(
-                        onClick = { runOp("remove") { removeChannel(serverUrl, s.sourceUrl); "Removed" } },
-                        enabled = !busy,
-                    ) {
-                        Icon(Icons.Default.Close, contentDescription = "Remove", tint = Muted)
+            OutlinedTextField(
+                value = newUrl,
+                onValueChange = { newUrl = it },
+                placeholder = { Text("Channel link or @handle") },
+                label = { Osd("TUNE IN", size = 16.sp, glow = false, color = Phosphor) },
+                singleLine = true,
+                enabled = ready,
+                shape = RoundedCornerShape(14.dp),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = { add() }),
+                trailingIcon = {
+                    IconButton(onClick = { add() }, enabled = !busy && ready && newUrl.isNotBlank()) {
+                        Icon(Icons.Default.Add, contentDescription = "Add channel")
                     }
+                },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = { picker.launch("*/*") }, enabled = !busy && ready) {
+                    Text("Import file")
+                }
+                IconButton(onClick = { showHelp = true }) {
+                    Icon(Icons.Outlined.Info, contentDescription = "How to import", tint = Muted)
+                }
+                if (busy) {
+                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                } else if (message != null) {
+                    Osd(message!!.uppercase(), size = 17.sp, glow = false)
+                }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                SectionLabel("On the dial")
+                Spacer(Modifier.weight(1f))
+                if (loading) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+            }
+            if (inputs.isEmpty() && !loading) Hint("No channels yet.")
+        }
+        // Numbered like a cable lineup card; channels that haven't
+        // broadcast anything yet sit at the end without a number.
+        val all = inputs.map { it to (it.title ?: titles[it.sourceUrl] ?: it.channelId ?: it.sourceUrl) }
+        val (onAir, offAir) = all.partition { lineup.number(it.second) != null }
+        for ((s, name) in onAir.sortedBy { lineup.number(it.second) }) {
+            ChannelRow(s, name, lineup.label(name), channelColor(name), busy) {
+                runOp("remove") { removeChannel(serverUrl, s.sourceUrl); "Removed" }
+            }
+        }
+        if (offAir.isNotEmpty()) {
+            // Followed, but nothing kept on the server right now.
+            SectionLabel("Off air", Modifier.padding(horizontal = 20.dp), color = Faint)
+            for ((s, name) in offAir.sortedBy { it.second.lowercase() }) {
+                ChannelRow(s, name, null, Faint, busy) {
+                    runOp("remove") { removeChannel(serverUrl, s.sourceUrl); "Removed" }
                 }
             }
         }
-        Gap(16)
+        Gap(24)
     }
     if (showHelp) ImportHelp(onDismiss = { showHelp = false })
+}
+
+@Composable
+private fun ChannelRow(s: SubInput, name: String, number: String?, color: Color, busy: Boolean, onRemove: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 60.dp).padding(start = 20.dp, end = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (number != null) {
+            Osd(number, color = color, size = 30.sp, modifier = Modifier.width(44.dp))
+            Box(Modifier.size(width = 3.dp, height = 30.dp).background(color))
+            Spacer(Modifier.width(14.dp))
+        }
+        Column(Modifier.weight(1f)) {
+            Text(
+                name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                color = if (number != null) Ink else Muted,
+            )
+            originLabel(s.origin)?.let { Hint(it) }
+        }
+        // Imported channels come and go with their file.
+        if (s.origin == "manual") {
+            IconButton(onClick = onRemove, enabled = !busy) {
+                Icon(Icons.Default.Close, contentDescription = "Remove", tint = Muted)
+            }
+        }
+    }
+    Box(Modifier.padding(start = 20.dp).fillMaxWidth().height(1.dp).background(Hairline))
 }
 
 @Composable
