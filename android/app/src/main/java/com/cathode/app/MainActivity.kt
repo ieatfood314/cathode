@@ -11,7 +11,16 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BarChart
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Subscriptions
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.LaunchedEffect
@@ -24,6 +33,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.util.UnstableApi
@@ -46,14 +56,6 @@ import com.cathode.app.player.Playback
 import com.cathode.app.player.PlaybackService
 import com.cathode.app.player.StreamCache
 import com.cathode.app.ui.CathodeTheme
-import androidx.compose.ui.unit.sp
-import com.cathode.app.ui.PowerOn
-import com.cathode.app.ui.Tube
-import com.cathode.app.ui.CrtScreen
-import com.cathode.app.ui.Lineup
-import com.cathode.app.ui.nowShowing
-import com.cathode.app.ui.NowPlayingBar
-import com.cathode.app.ui.Dial
 import com.cathode.app.ui.LibraryScreen
 import com.cathode.app.ui.PlayerScreen
 import com.cathode.app.ui.SettingsScreen
@@ -76,8 +78,6 @@ class MainActivity : ComponentActivity() {
     }
 
     private val showPlayerRequests = mutableIntStateOf(0)
-    // Read above the theme too: fullscreen video turns the CRT overlay off.
-    private val fullscreenState = mutableStateOf(false)
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
@@ -90,7 +90,7 @@ class MainActivity : ComponentActivity() {
         val startOnPlayer = intent?.getBooleanExtra(EXTRA_SHOW_PLAYER, false) == true
 
         setContent {
-            CathodeTheme { PowerOn { CrtScreen(enabled = !fullscreenState.value) {
+            CathodeTheme {
                 val scope = rememberCoroutineScope()
                 val appContext = LocalContext.current.applicationContext
                 // null until DataStore has loaded: a blank URL then means
@@ -109,7 +109,7 @@ class MainActivity : ComponentActivity() {
                 var openUri by remember { mutableStateOf<Uri?>(null) }
                 // Hoisted from PlayerScreen: fullscreen hides the nav bar so
                 // the video fills the whole screen edge-to-edge.
-                var playerFullscreen by fullscreenState
+                var playerFullscreen by remember { mutableStateOf(false) }
                 var server by remember { mutableStateOf<ServerSettings?>(null) }
                 var serverDirty by remember { mutableStateOf(false) }
                 var serverLoading by remember { mutableStateOf(false) }
@@ -230,25 +230,6 @@ class MainActivity : ComponentActivity() {
                     if (v != null) leave(v, pos)
                 }
 
-                fun openVideo(v: Video) {
-                    // Record where the previous video stopped first:
-                    // the switch below releases its player.
-                    val prev = open
-                    if (prev != null && prev.id != v.id) {
-                        leave(prev, livePositionOf(prev))
-                        // Don't let the previous video's file URI
-                        // briefly feed the new one.
-                        openUri = null
-                    }
-                    open = v
-                    tab = 2
-                    // Keep the media session reachable from
-                    // Android's media player outside the app.
-                    startForegroundService(
-                        Intent(this@MainActivity, PlaybackService::class.java)
-                    )
-                }
-
                 // Server polling is one setting with two halves: the server's
                 // loop and this phone's background sync. The server's value wins.
                 suspend fun adoptServerPolling(s: ServerSettings) {
@@ -347,24 +328,32 @@ class MainActivity : ComponentActivity() {
                 }
                 // Back walks to the library rather than out of the app; the
                 // player handles it first while fullscreen.
-                // Stats lives under Setup, so Back from it goes there first.
-                BackHandler(enabled = tab != 0) { tab = if (tab == 4) 3 else 0 }
+                BackHandler(enabled = tab != 0) { tab = 0 }
 
-                val lineup = remember(videos) { Lineup.of(videos) }
                 Scaffold(
-                    containerColor = Tube,
                     bottomBar = {
                         // Hidden in fullscreen so the video fills the screen.
-                        if (!playerFullscreen) Column {
-                            val playing = open
-                            if (playing != null && tab != 2) NowPlayingBar(
-                                video = playing,
-                                thumb = "${prefs.serverUrl}/api/thumbs/${playing.id}",
-                                lineup = lineup,
-                                onExpand = { tab = 2 },
-                                onClose = { closeVideo() },
+                        if (!playerFullscreen) NavigationBar(containerColor = Color.Black) {
+                            NavigationBarItem(
+                                selected = tab == 0, onClick = { tab = 0 },
+                                icon = { Icon(Icons.Default.Home, null) }, label = { Text("Library") },
                             )
-                            Dial(tab) { tab = it }
+                            NavigationBarItem(
+                                selected = tab == 1, onClick = { tab = 1 },
+                                icon = { Icon(Icons.Default.Subscriptions, null) }, label = { Text("Channels") },
+                            )
+                            NavigationBarItem(
+                                selected = tab == 2, onClick = { tab = 2 },
+                                icon = { Icon(Icons.Default.PlayArrow, null) }, label = { Text("Playing") },
+                            )
+                            NavigationBarItem(
+                                selected = tab == 4, onClick = { tab = 4 },
+                                icon = { Icon(Icons.Default.BarChart, null) }, label = { Text("Stats") },
+                            )
+                            NavigationBarItem(
+                                selected = tab == 3, onClick = { tab = 3 },
+                                icon = { Icon(Icons.Default.Settings, null) }, label = { Text("Settings") },
+                            )
                         }
                     }
                 ) { pad ->
@@ -388,14 +377,6 @@ class MainActivity : ComponentActivity() {
                                     val id = playing.id
                                     Library.scope.launch { Library.reportProgress(appContext, id, pos) }
                                 },
-                                lineup = lineup,
-                                upNext = videos.filter {
-                                    it.channelTitle == playing.channelTitle && it.id != playing.id && it.watched == 0
-                                }.take(8),
-                                alsoOnAir = nowShowing(videos)
-                                    .filter { it.channelTitle != playing.channelTitle }.take(6),
-                                thumbUrl = { v -> "${prefs.serverUrl}/api/thumbs/${v.id}" },
-                                onOpen = { v -> openVideo(v) },
                             )
                             tab == 0 -> LibraryScreen(
                                 videos = videos,
@@ -416,8 +397,24 @@ class MainActivity : ComponentActivity() {
                                     refresh()
                                 },
                                 onOpenSettings = { tab = 3 },
-                                onOpen = { v -> openVideo(v) },
-                                onOpenChannels = { tab = 1 },
+                                onOpen = { v ->
+                                    // Record where the previous video stopped first:
+                                    // the switch below releases its player.
+                                    val prev = open
+                                    if (prev != null && prev.id != v.id) {
+                                        leave(prev, livePositionOf(prev))
+                                        // Don't let the previous video's file URI
+                                        // briefly feed the new one.
+                                        openUri = null
+                                    }
+                                    open = v
+                                    tab = 2
+                                    // Keep the media session reachable from
+                                    // Android's media player outside the app.
+                                    startForegroundService(
+                                        Intent(this@MainActivity, PlaybackService::class.java)
+                                    )
+                                },
                                 onSetWatched = { v, w -> setWatched(v, w) },
                                 onClearProgress = { v -> setWatched(v, false) },
                                 onSave = { v -> saveVideo(v) },
@@ -428,10 +425,8 @@ class MainActivity : ComponentActivity() {
                                     }
                                 },
                             )
-                            tab == 1 -> SubscriptionsScreen(serverUrl = prefs.serverUrl, lineup = lineup)
+                            tab == 1 -> SubscriptionsScreen(serverUrl = prefs.serverUrl)
                             tab == 4 -> StatsScreen(
-                                lineup = lineup,
-                                onBack = { tab = 3 },
                                 canRefresh = canUseNetwork,
                                 notice = when {
                                     prefs.serverUrl.isBlank() -> null
@@ -483,7 +478,6 @@ class MainActivity : ComponentActivity() {
                                         }
                                     }
                                 },
-                                onOpenStats = { tab = 4 },
                                 onClearSaved = {
                                     scope.launch(Dispatchers.IO) {
                                         OfflineRepo.clearAll(appContext, store)
@@ -495,7 +489,7 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 }
-            } } }
+            }
         }
     }
 }
@@ -504,8 +498,8 @@ class MainActivity : ComponentActivity() {
 private fun NothingPlaying(onBrowse: () -> Unit) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            com.cathode.app.ui.Reverse("NO SIGNAL", size = 40.sp)
-            androidx.compose.material3.TextButton(onClick = onBrowse) { Text("Back to On Air") }
+            Text("Nothing playing", style = MaterialTheme.typography.titleMedium)
+            androidx.compose.material3.TextButton(onClick = onBrowse) { Text("Go to library") }
         }
     }
 }

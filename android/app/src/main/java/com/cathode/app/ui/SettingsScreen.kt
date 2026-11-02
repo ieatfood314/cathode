@@ -10,15 +10,11 @@ import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.Box
-import androidx.compose.ui.draw.alpha
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -40,7 +36,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -53,7 +48,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.cathode.app.data.AppPrefs
 import com.cathode.app.data.ServerSettings
@@ -148,20 +142,17 @@ fun SettingsScreen(
     onServer: (ServerSettings) -> Unit,
     onTestConnection: () -> Unit,
     onClearSaved: () -> Unit,
-    onOpenStats: () -> Unit = {},
 ) {
     Column(
         Modifier
             .fillMaxSize()
-            .background(Tube)
+            .background(Color.Black)
             .verticalScroll(rememberScrollState())
+            .padding(16.dp)
     ) {
-      Column(Modifier.padding(horizontal = 20.dp).padding(top = 18.dp, bottom = 24.dp)) {
-        ScreenTitle("Setup", kicker = "Service menu")
-        Gap(12)
-        StatsEntry(onOpenStats)
+        ScreenTitle("Settings")
 
-        SectionLabel("Antenna")
+        SectionLabel("Connection")
         Panel {
             ServerUrlField(prefs.serverUrl) { url -> onPrefs { it.copy(serverUrl = url) } }
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -171,7 +162,7 @@ fun SettingsScreen(
                 if (testing) {
                     CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
                 } else if (connStatus != null) {
-                    Osd(connStatus.uppercase(), size = 18.sp, glow = false)
+                    Hint(connStatus)
                 }
             }
             RowDivider()
@@ -220,30 +211,14 @@ fun SettingsScreen(
         }
 
         Row(verticalAlignment = Alignment.Bottom) {
-            SectionLabel("Station")
+            SectionLabel("Server")
             Spacer(Modifier.weight(1f))
-            if (serverStatus != null) Osd(serverStatus.uppercase(), Modifier.padding(bottom = 10.dp), size = 17.sp, glow = false)
+            if (serverStatus != null) Hint(serverStatus, Modifier.padding(bottom = 8.dp))
         }
         when {
             server != null -> ServerPanels(server, onServer)
             serverLoading -> CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
             else -> Hint("Connect to a server to change these.")
-        }
-      }
-    }
-}
-
-/** "> STATS ........ 0:35 TODAY": the way into Stats. */
-@Composable
-private fun StatsEntry(onClick: () -> Unit) {
-    val stats by com.cathode.app.data.WatchTime.stats.collectAsState()
-    Panel(Modifier.clickable(onClick = onClick)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Osd(">", color = P60, size = 24.sp, glow = false)
-            Spacer(Modifier.width(12.dp))
-            Osd("STATS", size = 26.sp)
-            Spacer(Modifier.weight(1f))
-            Osd(formatWatch(stats.today).uppercase() + " TODAY", color = P60, size = 20.sp, glow = false)
         }
     }
 }
@@ -356,7 +331,6 @@ private fun ServerUrlField(stored: String, onCommit: (String) -> Unit) {
         },
         label = { Text("Server address") },
         placeholder = { Text("http://192.168.1.10:8000") },
-        shape = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
         singleLine = true,
         modifier = Modifier.fillMaxWidth(),
     )
@@ -491,7 +465,7 @@ private fun RowDivider() = HorizontalDivider(
 private fun ValueLabel(label: String, value: String) {
     Row(Modifier.fillMaxWidth()) {
         Text(label, Modifier.weight(1f))
-        Osd(value.uppercase(), size = 19.sp, glow = false)
+        Text(value, color = Muted)
     }
 }
 
@@ -521,10 +495,10 @@ private fun SwitchRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
-            Text(label, color = if (enabled) P100 else P40)
+            Text(label, color = if (enabled) Color.Unspecified else Muted)
             if (desc != null) Hint(desc)
         }
-        BlockToggle(checked && enabled, Modifier.alpha(if (enabled) 1f else 0.5f))
+        Switch(checked = checked, onCheckedChange = null, enabled = enabled)
     }
 }
 
@@ -537,14 +511,8 @@ private fun RadioRow(label: String, selected: Boolean, enabled: Boolean = true, 
             .padding(vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // (*) / ( ): a terminal radio button.
-        Osd(
-            if (selected) "(*)" else "( )",
-            color = if (!enabled) P20 else if (selected) P100 else P60,
-            size = 22.sp, glow = selected,
-            modifier = Modifier.padding(vertical = 8.dp),
-        )
-        Text(label, Modifier.padding(start = 12.dp), color = if (!enabled) P40 else if (selected) P100 else P80)
+        RadioButton(selected = selected, onClick = null, enabled = enabled, modifier = Modifier.padding(8.dp))
+        Text(label, Modifier.padding(start = 8.dp), color = if (enabled) Color.Unspecified else Muted)
     }
 }
 
@@ -563,19 +531,12 @@ private fun ChipGrid(
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 for ((id, label) in row) {
-                    val on = id in selected
-                    Box(
-                        Modifier
-                            .weight(1f)
-                            .padding(vertical = 4.dp)
-                            .border(1.dp, if (on) P100 else P40)
-                            .background(if (on) P100 else Color.Transparent)
-                            .clickable { onToggle(id) }
-                            .padding(vertical = 6.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Osd(label.uppercase(), color = if (on) OnPhosphor else P80, size = 19.sp, glow = false)
-                    }
+                    FilterChip(
+                        selected = id in selected,
+                        onClick = { onToggle(id) },
+                        label = { Text(label, maxLines = 1) },
+                        modifier = Modifier.weight(1f),
+                    )
                 }
                 repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
             }

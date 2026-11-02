@@ -5,22 +5,6 @@ import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -78,7 +62,7 @@ private fun originLabel(origin: String) = when (origin) {
  * subscriptions export (Google Takeout CSV, OPML, or a plain .txt list).
  */
 @Composable
-fun SubscriptionsScreen(serverUrl: String, lineup: Lineup = Lineup(emptyList())) {
+fun SubscriptionsScreen(serverUrl: String) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var inputs by remember { mutableStateOf<List<SubInput>>(emptyList()) }
@@ -158,146 +142,75 @@ fun SubscriptionsScreen(serverUrl: String, lineup: Lineup = Lineup(emptyList()))
     Column(
         Modifier
             .fillMaxSize()
-            .background(Tube)
+            .background(Color.Black)
             .verticalScroll(rememberScrollState())
+            .padding(16.dp)
     ) {
-        Column(Modifier.padding(horizontal = 20.dp).padding(top = 18.dp)) {
-            ScreenTitle("Lineup", kicker = if (inputs.isEmpty()) "Channels" else "${inputs.size} channels")
-            Gap(18)
+        ScreenTitle("Channels")
+        Gap(16)
 
-            if (!ready) {
-                Osd("! SET A SERVER ADDRESS IN SETUP FIRST", color = P80, size = 19.sp, glow = false)
-                Gap(16)
-            }
+        if (!ready) {
+            Hint("Set a server address in Settings first.")
+            Gap(16)
+        }
 
-            TunePrompt(
-                value = newUrl,
-                onValue = { newUrl = it },
-                enabled = ready && !busy,
-                onAdd = { add() },
-            )
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = { picker.launch("*/*") }, enabled = !busy && ready) {
-                    Text("Import file")
-                }
-                IconButton(onClick = { showHelp = true }) {
-                    Icon(Icons.Outlined.Info, contentDescription = "How to import", tint = P60)
-                }
-                if (busy) {
-                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                } else if (message != null) {
-                    Osd(message!!.uppercase(), size = 19.sp, glow = false)
-                }
-            }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                SectionLabel("On the dial")
-                Spacer(Modifier.weight(1f))
-                if (loading) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-            }
-            if (inputs.isEmpty() && !loading) Hint("No channels yet.")
-        }
-        // Numbered like a cable lineup card; channels that haven't
-        // broadcast anything yet sit at the end without a number.
-        val all = inputs.map { it to (it.title ?: titles[it.sourceUrl] ?: it.channelId ?: it.sourceUrl) }
-        val (onAir, offAir) = all.partition { lineup.number(it.second) != null }
-        for ((s, name) in onAir.sortedBy { lineup.number(it.second) }) {
-            ChannelRow(s, name, lineup.label(name), busy) {
-                runOp("remove") { removeChannel(serverUrl, s.sourceUrl); "Removed" }
-            }
-        }
-        if (offAir.isNotEmpty()) {
-            // Followed, but nothing kept on the server right now.
-            SectionLabel("Off air", Modifier.padding(horizontal = 20.dp), color = P60)
-            for ((s, name) in offAir.sortedBy { it.second.lowercase() }) {
-                ChannelRow(s, name, null, busy) {
-                    runOp("remove") { removeChannel(serverUrl, s.sourceUrl); "Removed" }
-                }
-            }
-        }
-        Gap(24)
-    }
-    if (showHelp) ImportHelp(onDismiss = { showHelp = false })
-}
-
-/**
- * "> channel link or @handle  [ADD]": a terminal prompt. ADD lights once
- * there's something to add; tapped while empty it puts the cursor in the
- * field instead of doing nothing.
- */
-@Composable
-private fun TunePrompt(value: String, onValue: (String) -> Unit, enabled: Boolean, onAdd: () -> Unit) {
-    val focus = remember { FocusRequester() }
-    var focused by remember { mutableStateOf(false) }
-    val ready = value.isNotBlank()
-    Osd("TUNE IN", color = P60, size = 19.sp, glow = false)
-    Gap(4)
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .border(1.dp, if (focused) P100 else P40, RoundedCornerShape(4.dp))
-            .background(Tube1)
-            .clickable(enabled = enabled) { focus.requestFocus() }
-            .padding(start = 12.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Osd(">", color = if (focused) P100 else P60, size = 26.sp, glow = focused)
-        Spacer(Modifier.width(10.dp))
-        BasicTextField(
-            value = value,
-            onValueChange = onValue,
-            enabled = enabled,
+        OutlinedTextField(
+            value = newUrl,
+            onValueChange = { newUrl = it },
+            placeholder = { Text("Channel link or @handle") },
             singleLine = true,
-            textStyle = TextStyle(fontFamily = Vt, fontSize = 24.sp, color = P100),
-            cursorBrush = SolidColor(P100),
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done, keyboardType = KeyboardType.Uri),
-            keyboardActions = KeyboardActions(onDone = { if (ready) onAdd() }),
-            modifier = Modifier
-                .weight(1f)
-                .focusRequester(focus)
-                .onFocusChanged { focused = it.isFocused },
-            decorationBox = { inner ->
-                Box(contentAlignment = Alignment.CenterStart) {
-                    if (value.isEmpty()) Osd("CHANNEL LINK OR @HANDLE", color = P40, size = 22.sp, glow = false)
-                    inner()
+            enabled = ready,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+            keyboardActions = KeyboardActions(onDone = { add() }),
+            trailingIcon = {
+                IconButton(onClick = { add() }, enabled = !busy && ready && newUrl.isNotBlank()) {
+                    Icon(Icons.Default.Add, contentDescription = "Add channel")
                 }
             },
+            modifier = Modifier.fillMaxWidth(),
         )
-        Spacer(Modifier.width(8.dp))
-        Box(
-            Modifier
-                .border(1.dp, if (ready) P100 else P40)
-                .background(if (ready && enabled) P100 else Color.Transparent)
-                .clickable(enabled = enabled) { if (ready) onAdd() else focus.requestFocus() }
-                .padding(horizontal = 12.dp, vertical = 4.dp),
-        ) {
-            Osd("ADD", color = if (ready && enabled) OnPhosphor else P40, size = 22.sp, glow = false)
-        }
-    }
-}
-
-@Composable
-private fun ChannelRow(s: SubInput, name: String, number: String?, busy: Boolean, onRemove: () -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().heightIn(min = 60.dp).padding(start = 20.dp, end = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Osd(number ?: "--", color = if (number != null) P100 else P40, size = 34.sp,
-            glow = number != null, modifier = Modifier.width(50.dp))
-        Column(Modifier.weight(1f)) {
-            Osd(
-                name.uppercase(), size = 23.sp, overflow = TextOverflow.Ellipsis,
-                color = if (number != null) P100 else P60, glow = false,
-            )
-            originLabel(s.origin)?.let { Osd(it.uppercase(), color = P40, size = 17.sp, glow = false) }
-        }
-        // Imported channels come and go with their file.
-        if (s.origin == "manual") {
-            IconButton(onClick = onRemove, enabled = !busy) {
-                Icon(Icons.Default.Close, contentDescription = "Remove", tint = P60)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TextButton(onClick = { picker.launch("*/*") }, enabled = !busy && ready) {
+                Text("Import file")
+            }
+            IconButton(onClick = { showHelp = true }) {
+                Icon(Icons.Outlined.Info, contentDescription = "How to import", tint = Muted)
+            }
+            if (busy) {
+                CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+            } else if (message != null) {
+                Hint(message!!)
             }
         }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            SectionLabel(if (inputs.isEmpty()) "Following" else "Following · ${inputs.size}")
+            Spacer(Modifier.weight(1f))
+            if (loading) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+        }
+        if (inputs.isEmpty() && !loading) Hint("No channels yet.")
+        for (s in inputs) {
+            Row(
+                Modifier.fillMaxWidth().heightIn(min = 56.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(s.title ?: titles[s.sourceUrl] ?: s.channelId ?: s.sourceUrl)
+                    originLabel(s.origin)?.let { Hint(it) }
+                }
+                // Imported channels come and go with their file.
+                if (s.origin == "manual") {
+                    IconButton(
+                        onClick = { runOp("remove") { removeChannel(serverUrl, s.sourceUrl); "Removed" } },
+                        enabled = !busy,
+                    ) {
+                        Icon(Icons.Default.Close, contentDescription = "Remove", tint = Muted)
+                    }
+                }
+            }
+        }
+        Gap(16)
     }
-    Box(Modifier.padding(start = 20.dp).fillMaxWidth().height(1.dp).background(P10))
+    if (showHelp) ImportHelp(onDismiss = { showHelp = false })
 }
 
 @Composable

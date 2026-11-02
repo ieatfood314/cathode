@@ -7,24 +7,7 @@ import android.net.Uri
 import android.os.Build
 import android.view.WindowManager
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.sp
-import coil.compose.AsyncImage
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
@@ -54,8 +37,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -87,13 +68,6 @@ fun PlayerScreen(
     onFullscreenChange: (Boolean) -> Unit,
     onClose: () -> Unit,
     onLeave: (positionSeconds: Int) -> Unit,
-    lineup: Lineup = Lineup(emptyList()),
-    // Same channel, not yet watched: what's on after this.
-    upNext: List<Video> = emptyList(),
-    // Other channels' next programs.
-    alsoOnAir: List<Video> = emptyList(),
-    thumbUrl: (Video) -> String = { "" },
-    onOpen: (Video) -> Unit = {},
 ) {
     val context = LocalContext.current
     val activity = context as? Activity
@@ -118,8 +92,6 @@ fun PlayerScreen(
 
     // Save progress on leaving (tab switch, app close). While playing,
     // Playback's own saver keeps it fresh every few seconds.
-    // Leaving the player: the screen-wide scanlines cover everything again.
-    DisposableEffect(Unit) { onDispose { VideoHole.rect = null } }
     DisposableEffect(player, video.id) {
         onDispose {
             // A released player throws on reads; -1 means it was already
@@ -246,12 +218,10 @@ fun PlayerScreen(
                         view.keepScreenOn = playing
                     },
                     onRelease = { view -> view.player = null },
-                    // The screen-wide scanlines skip the picture itself.
-                    modifier = videoModifier.videoHole(),
+                    modifier = videoModifier,
                 )
             }
             SeekFeedback(seekSide, seekVisible, seekSeconds, videoModifier)
-            ChannelFlash(video, lineup, videoModifier)
             if (controlsVisible) {
                 IconButton(
                     onClick = onClose,
@@ -262,135 +232,32 @@ fun PlayerScreen(
                 ) {
                     Icon(
                         Icons.Default.Close, contentDescription = "Close player",
-                        tint = P100,
+                        tint = Color.White,
                     )
                 }
             }
         }
         if (showDetails) {
-            ProgramCard(
-                video, lineup, saveState, savedUri != null, upNext, alsoOnAir, thumbUrl, onOpen,
-                Modifier.fillMaxWidth().weight(1f),
-            )
-        }
-    }
-}
-
-/**
- * The TV's own channel banner: on every new program, the channel number
- * and name glow in the corner for a few seconds, then fade.
- */
-@Composable
-private fun ChannelFlash(video: Video, lineup: Lineup, modifier: Modifier) {
-    var visible by remember(video.id) { mutableStateOf(true) }
-    LaunchedEffect(video.id) {
-        delay(2800)
-        visible = false
-    }
-    Box(modifier, contentAlignment = Alignment.TopEnd) {
-        AnimatedVisibility(visible, enter = fadeIn(), exit = fadeOut(tween(700))) {
             Column(
                 Modifier
-                    .windowInsetsPadding(WindowInsets.displayCutout)
-                    .padding(top = 12.dp, end = 12.dp)
-                    .background(Color.Black.copy(alpha = 0.78f))
-                    .padding(horizontal = 12.dp, vertical = 6.dp),
-                horizontalAlignment = Alignment.End,
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .verticalScroll(rememberScrollState())
+                    .padding(16.dp)
             ) {
-                Osd("CH ${lineup.label(video.channelTitle)}", size = 48.sp)
-                Osd(video.channelTitle.orEmpty().uppercase(), size = 20.sp)
-            }
-        }
-    }
-}
-
-@Composable
-private fun ProgramCard(
-    video: Video,
-    lineup: Lineup,
-    saveState: SaveState,
-    onPhone: Boolean,
-    upNext: List<Video>,
-    alsoOnAir: List<Video>,
-    thumbUrl: (Video) -> String,
-    onOpen: (Video) -> Unit,
-    modifier: Modifier,
-) {
-    Column(modifier.background(Tube).verticalScroll(rememberScrollState())) {
-        Box(Modifier.fillMaxWidth().height(1.dp).background(P40))
-        Column(Modifier.padding(start = 20.dp, end = 20.dp, top = 16.dp)) {
-            Osd(
-                "CH ${lineup.label(video.channelTitle)}  ${video.channelTitle.orEmpty().uppercase()}",
-                color = P60, size = 22.sp, glow = false,
-            )
-            Osd(video.title.orEmpty(), size = 32.sp, maxLines = 4, overflow = TextOverflow.Ellipsis)
-            Gap(12)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (video.duration > 0) Chip(formatDuration(video.duration))
-                uploadedLabel(video)?.let { Chip(it.uppercase()) }
-                when {
-                    saveState is SaveState.Saving -> Reverse("● REC ${(saveState.fraction * 100).toInt()}%", size = 20.sp, blink = true)
-                    saveState is SaveState.Queued -> Chip("QUEUED")
-                    onPhone -> Reverse("ON PHONE", size = 20.sp)
+                Text(video.title.orEmpty(), style = MaterialTheme.typography.titleMedium)
+                Gap(4)
+                val status = when {
+                    saveState is SaveState.Saving -> "Saving ${(saveState.fraction * 100).toInt()}%"
+                    saveState is SaveState.Queued -> "Queued"
+                    savedUri != null -> "On phone"
+                    else -> null
                 }
+                Text(
+                    listOfNotNull(video.channelTitle, uploadedLabel(video), status).joinToString("  ·  "),
+                    style = MaterialTheme.typography.bodyMedium, color = Muted,
+                )
             }
-        }
-        if (upNext.isNotEmpty()) {
-            SectionLabel("Later on CH ${lineup.label(video.channelTitle)}", Modifier.padding(horizontal = 20.dp))
-            for (v in upNext) UpNextRow(v, thumbUrl(v), null) { onOpen(v) }
-        }
-        if (alsoOnAir.isNotEmpty()) {
-            SectionLabel("Also on air", Modifier.padding(horizontal = 20.dp))
-            for (v in alsoOnAir) UpNextRow(v, thumbUrl(v), lineup.label(v.channelTitle)) { onOpen(v) }
-        }
-        Gap(24)
-    }
-}
-
-@Composable
-private fun Chip(text: String) {
-    Box(Modifier.border(1.dp, P40).padding(horizontal = 6.dp)) {
-        Osd(text, color = P80, size = 20.sp, glow = false)
-    }
-}
-
-@Composable
-private fun UpNextRow(v: Video, thumb: String, channel: String?, onClick: () -> Unit) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = 20.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(
-            Modifier
-                .size(width = 112.dp, height = 63.dp)
-                .clip(RoundedCornerShape(4.dp))
-                .background(Tube2)
-                .border(1.dp, P20, RoundedCornerShape(4.dp))
-        ) {
-            AsyncImage(
-                model = thumb, contentDescription = null, contentScale = ContentScale.Crop,
-                colorFilter = PhosphorTint,
-                modifier = Modifier.fillMaxSize().alpha(0.8f).scanlines(0.3f),
-            )
-            val f = watchFraction(v)
-            if (f > 0f) {
-                Box(Modifier.align(Alignment.BottomStart).fillMaxWidth(f).height(3.dp).background(P100))
-            }
-        }
-        Spacer(Modifier.width(14.dp))
-        Column(Modifier.weight(1f)) {
-            if (channel != null) {
-                Osd("CH $channel  ${v.channelTitle.orEmpty().uppercase()}", color = P60, size = 17.sp, glow = false)
-            }
-            Osd(v.title.orEmpty(), size = 21.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, glow = false)
-            Osd(
-                listOfNotNull(formatDuration(v.duration).ifEmpty { null }, uploadedLabel(v)?.uppercase())
-                    .joinToString(" · "),
-                color = P60, size = 17.sp, glow = false,
-            )
         }
     }
 }

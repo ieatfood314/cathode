@@ -867,18 +867,3 @@ def test_unfinished_streams_wait_for_the_vod(tmp_path, monkeypatch):
     assert conn.execute("SELECT status FROM videos WHERE id='livewan0001'").fetchone()["status"] == "failed"
     conn.close()
     assert _scan_one(monkeypatch, media, db_path, "livewan0001", (False, "x")) == ["livewan0001"]
-
-
-def test_web_ui_and_assets(tmp_path, monkeypatch):
-    from fastapi.testclient import TestClient
-    from app.main import app
-    _isolated(tmp_path, monkeypatch)
-    c = TestClient(app)
-    page = c.get("/")
-    assert page.status_code == 200 and "/assets/cathode.js" in page.text
-    for name, ctype in [("cathode.css", "text/css"), ("cathode.js", "text/javascript"), ("vt323.ttf", "font/ttf")]:
-        r = c.get("/assets/" + name)
-        assert r.status_code == 200 and r.headers["content-type"].startswith(ctype) and r.content
-    # Only the fixed list is served: no other files, no path tricks.
-    assert c.get("/assets/index.html").status_code == 404
-    assert c.get("/assets/..%2Fmain.py").status_code == 404

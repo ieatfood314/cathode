@@ -5,7 +5,7 @@
 Your subscriptions, auto-downloaded to your NAS, watchable offline on your phone. No Premium, no cellular data, no progress lost on bad Wi-Fi.
 
 - **NAS downloader** (Docker, `server/`): polls your channels, grabs new uploads with **yt-dlp + SponsorBlock**, serves them over your LAN.
-- **Android app** (`android/`, a TV station made of your subscriptions): library of downloaded videos, in-app playback, auto-sync the moment you open it.
+- **Android app** (`android/`, OLED black + glass): library of downloaded videos, in-app playback, auto-sync the moment you open it.
 - **Generic by design**: point `data/subscriptions.opml` or `data/channels.txt` at your channels and it works. No personal data in this repo.
 
 Inspired by [Pinchflat](https://github.com/kieraneglin/pinchflat) (auto-archive + SponsorBlock model) and [TubeArchivist](https://github.com/tubearchivist/tubearchivist) (self-hosted library model). Cathode is the lightweight alternative: single small server + a purpose-built offline-first phone app instead of Plex/Jellyfin + a heavy index.
@@ -35,14 +35,10 @@ cp .env.example .env
 curl -X POST http://<your-nas>:8000/api/subscriptions/refresh
 ```
 
-Open `http://<your-nas>:8000/api/feed` for your library as JSON, or open
-`http://<your-nas>:8000/` in any browser for the web UI. It has the app's
-phosphor-tube design and pages: On air (swipe, drag or use ←/→ to change
-channel, Enter to watch), the guide, Lineup with import, and Setup with every
-server setting plus Stats. The video keeps playing in a mini strip while you
-browse, and progress and watch time sync like the phone. There's no offline
-sync on the web. The page is plain HTML/CSS/JS in `server/app/static/`, with
-no build step.
+Open `http://<your-nas>:8000/api/feed` — your library as JSON — or just open
+`http://<your-nas>:8000/` in a desktop browser for the minimal web UI
+(same library, player, and settings as the app; handy on a computer, no
+offline sync there).
 
 ### Free subscription export (no Premium)
 
@@ -52,16 +48,11 @@ no build step.
 
 ## Android app (Obtainium)
 
-Designed as a TV station made of your subscriptions, on a monochrome green-phosphor tube. There's one phosphor at a few brightness levels on black glass, one terminal typeface (VT323, OFL, bundled in `res/font`), and scanlines over every screen. Emphasis is reverse video (a lit block with dark text), never a second color. Only the picture is in full color: the video and the big screen on On air. Thumbnails in lists are drawn in phosphor. Every channel gets a number (CH 01, CH 02…, alphabetical) that stays the same on every screen.
-
-- **On air**: one big tube showing what to watch next on each channel. Swipe it to change channel; the picture breaks into static as you drag and tunes in as the next channel lands. Under it is the **guide**, one row per channel, where each block is as wide as the video is long. Filters: all, unwatched, on phone. Long-press anything for its menu.
-- **Lineup**: the channels you follow, numbered. Ones with nothing on the server right now are listed under *Off air*.
-- **Setup**: settings, with terminal-style `ON`/`OFF` toggles and `(*)` radio buttons. **Stats** sits at the top of Setup: watch time (see below), with today on a VCR-style counter, an LED bar chart of the last two weeks and each channel's share of the last 30 days.
-- The player shows the channel banner when a program starts, then *Later on this channel* and *Also on air*. While you browse, a now-playing strip sits above the dial.
+OLED black (`#000000`), flat panels, one violet accent. Bottom nav: Library / Channels / Playing / Stats / Settings.
 
 **Saving to the phone** runs in the background: new uploads are saved after every sync (including the phone's own background sync), and a tapped **Save to phone** keeps going after you close the app. Each library row shows the channel and when the video was uploaded. For saves to run to the end with a progress notification, turn on Settings → **Background downloads** → Allow (this lifts Android's battery optimization for Cathode). Without that, Android stops a background save after about 10 minutes, and it resumes from the same spot next time.
 
-**Stats** (Setup → Stats) shows how long you've actually spent watching: today, the last 7 days, a daily average, all time, a two-week chart and your top channels. Only time spent playing counts (not paused or buffering), and time watched offline is added once the phone is back on Wi-Fi. The web UI's player counts too.
+**Stats** shows how long you've actually spent watching: today, the last 7 days, a daily average, all time, a two-week chart and your top channels. Only time spent playing counts (not paused or buffering), and time watched offline is added once the phone is back on Wi-Fi. The web UI's player counts too.
 
 **Install via [Obtainium](https://apps.obtainium.imranr.dev/)** (update tracking, no store needed): add app → source GitHub → `https://github.com/ieatfood314/cathode` — it picks up each release APK automatically. Or download the APK from the [releases page](../../releases) and install directly.
 
