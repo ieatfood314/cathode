@@ -359,13 +359,15 @@ private fun noiseFrame(w: Int, h: Int, seed: Int): ImageBitmap {
 
 /**
  * Live analog snow. Four pre-rendered frames cycled every frame: one
- * bitmap draw, however big the screen.
+ * bitmap draw, however big the screen. With [animate] off it holds a
+ * still frame and costs nothing between draws.
  */
 @Composable
-fun Static(modifier: Modifier = Modifier) {
+fun Static(modifier: Modifier = Modifier, animate: Boolean = true) {
     val frames = remember { List(4) { noiseFrame(140, 120, it) } }
     var frame by remember { mutableLongStateOf(0L) }
-    LaunchedEffect(Unit) { while (true) withFrameMillis { frame = it } }
+    // Still frame when not animating: no per-frame work at rest.
+    LaunchedEffect(animate) { while (animate) withFrameMillis { frame = it } }
     Canvas(modifier) {
         val img = frames[((frame / 16) % frames.size).toInt()]
         drawImage(

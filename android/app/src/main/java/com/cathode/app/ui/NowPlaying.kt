@@ -117,7 +117,7 @@ fun NowPlayingBar(
     }
 }
 
-/** The OSD menu bar: four words, the active one lit. */
+/** The OSD menu bar: three words, the active one lit. */
 @Composable
 fun Dial(tab: Int, onTab: (Int) -> Unit) {
     Column(Modifier.fillMaxWidth().background(Tube).navigationBarsPadding()) {
@@ -128,8 +128,8 @@ fun Dial(tab: Int, onTab: (Int) -> Unit) {
         ) {
             DialButton("On air", tab == 0) { onTab(0) }
             DialButton("Lineup", tab == 1) { onTab(1) }
-            DialButton("Ratings", tab == 4) { onTab(4) }
-            DialButton("Setup", tab == 3) { onTab(3) }
+            // Stats (tab 4) is a page inside Setup.
+            DialButton("Setup", tab == 3 || tab == 4) { onTab(3) }
         }
     }
 }

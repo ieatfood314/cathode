@@ -347,7 +347,8 @@ class MainActivity : ComponentActivity() {
                 }
                 // Back walks to the library rather than out of the app; the
                 // player handles it first while fullscreen.
-                BackHandler(enabled = tab != 0) { tab = 0 }
+                // Stats lives under Setup, so Back from it goes there first.
+                BackHandler(enabled = tab != 0) { tab = if (tab == 4) 3 else 0 }
 
                 val lineup = remember(videos) { Lineup.of(videos) }
                 Scaffold(
@@ -430,6 +431,7 @@ class MainActivity : ComponentActivity() {
                             tab == 1 -> SubscriptionsScreen(serverUrl = prefs.serverUrl, lineup = lineup)
                             tab == 4 -> StatsScreen(
                                 lineup = lineup,
+                                onBack = { tab = 3 },
                                 canRefresh = canUseNetwork,
                                 notice = when {
                                     prefs.serverUrl.isBlank() -> null
@@ -481,6 +483,7 @@ class MainActivity : ComponentActivity() {
                                         }
                                     }
                                 },
+                                onOpenStats = { tab = 4 },
                                 onClearSaved = {
                                     scope.launch(Dispatchers.IO) {
                                         OfflineRepo.clearAll(appContext, store)

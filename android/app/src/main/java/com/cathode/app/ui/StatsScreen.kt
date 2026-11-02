@@ -65,7 +65,7 @@ private fun dayLabel(day: LocalDate, today: LocalDate): String = when (day) {
  * it shows the last numbers plus whatever was watched since.
  */
 @Composable
-fun StatsScreen(canRefresh: Boolean, notice: String?, lineup: Lineup = Lineup(emptyList())) {
+fun StatsScreen(canRefresh: Boolean, notice: String?, lineup: Lineup = Lineup(emptyList()), onBack: () -> Unit = {}) {
     val context = LocalContext.current.applicationContext
     val stats by WatchTime.stats.collectAsState()
     var error by remember { mutableStateOf<String?>(null) }
@@ -83,7 +83,12 @@ fun StatsScreen(canRefresh: Boolean, notice: String?, lineup: Lineup = Lineup(em
             .padding(horizontal = 20.dp)
             .padding(top = 16.dp)
     ) {
-        ScreenTitle("Ratings", kicker = "Your viewing")
+        // A page inside Setup: the kicker is the way back.
+        Osd(
+            "< SETUP", color = P60, size = 22.sp, glow = false,
+            modifier = Modifier.clickable(onClick = onBack).padding(vertical = 6.dp),
+        )
+        ScreenTitle("Stats")
         (notice ?: error)?.let { Osd("! " + it.uppercase(), color = P80, size = 18.sp, glow = false, maxLines = 2) }
         Gap(18)
         Counter(stats.today)

@@ -52,6 +52,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -68,6 +69,7 @@ import java.time.LocalTime
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
+import kotlin.math.absoluteValue
 
 private enum class GuideFilter(val label: String) { ALL("All"), NEW("Unwatched"), PHONE("On phone") }
 
@@ -282,16 +284,14 @@ private fun NowShowing(
     if (picks.isEmpty()) return
     val pager = rememberPagerState { picks.size }
     val haptics = LocalHapticFeedback.current
-    // A burst of snow on every channel change, like flicking a dial.
-    var snow by remember { mutableStateOf(false) }
-    var settledOnce by remember { mutableStateOf(false) }
-    LaunchedEffect(pager.settledPage) {
-        if (!settledOnce) { settledOnce = true; return@LaunchedEffect }
-        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-        snow = true
-        delay(190)
-        snow = false
+    // A tick the moment the dial passes the halfway point, not after the
+    // fling settles.
+    var lastPage by remember { mutableStateOf(pager.currentPage) }
+    LaunchedEffect(pager.currentPage) {
+        if (pager.currentPage != lastPage) haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+        lastPage = pager.currentPage
     }
+    val tuning = pager.isScrollInProgress
     Column(Modifier.padding(top = 6.dp)) {
         HorizontalPager(
             state = pager,
@@ -302,19 +302,16 @@ private fun NowShowing(
             val v = picks[page]
             Tube(
                 v, lineup, thumbUrl(v), stateOf(v),
-                snow = snow && page == pager.currentPage,
+                // How far this channel is from tuned in: 0 centred, 1 a
+                // whole page away. Read at draw time, so dragging doesn't
+                // recompose anything.
+                detune = {
+                    ((pager.currentPage - page) + pager.currentPageOffsetFraction).absoluteValue
+                },
+                tuning = tuning,
                 onClick = { onOpen(v) },
                 onLongClick = { onMenu(v) },
             )
-        }
-        // The dial: ◄ 1/3 ►, one tick per channel on air.
-        Row(
-            Modifier.fillMaxWidth().padding(top = 10.dp, start = 20.dp, end = 20.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Osd("◄ SWIPE TO CHANGE CHANNEL ►", color = P40, size = 17.sp, glow = false)
-            Spacer(Modifier.weight(1f))
-            Osd("%d/%d".format(pager.currentPage + 1, picks.size), color = P60, size = 19.sp, glow = false)
         }
     }
 }
@@ -326,7 +323,8 @@ private fun Tube(
     lineup: Lineup,
     thumb: String,
     state: SaveState,
-    snow: Boolean,
+    detune: () -> Float,
+    tuning: Boolean,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
 ) {
@@ -395,9 +393,15 @@ private fun Tube(
                 Box(Modifier.fillMaxWidth(fraction).fillMaxHeight().background(P100))
             }
         }
-        AnimatedVisibility(snow, enter = fadeIn(tween(40)), exit = fadeOut(tween(120))) {
-            Static(Modifier.fillMaxSize())
-        }
+        // Snow follows the finger: off-centre channels are untuned, and the
+        // incoming one clears as it slides in. It only animates mid-drag;
+        // at rest the peeking neighbours hold a still frame.
+        Static(
+            Modifier.fillMaxSize().graphicsLayer {
+                alpha = ((detune() - 0.04f) * 2.4f).coerceIn(0f, 1f)
+            },
+            animate = tuning,
+        )
     }
 }
 

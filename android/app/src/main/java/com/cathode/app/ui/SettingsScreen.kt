@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -39,6 +40,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -146,6 +148,7 @@ fun SettingsScreen(
     onServer: (ServerSettings) -> Unit,
     onTestConnection: () -> Unit,
     onClearSaved: () -> Unit,
+    onOpenStats: () -> Unit = {},
 ) {
     Column(
         Modifier
@@ -155,6 +158,8 @@ fun SettingsScreen(
     ) {
       Column(Modifier.padding(horizontal = 20.dp).padding(top = 18.dp, bottom = 24.dp)) {
         ScreenTitle("Setup", kicker = "Service menu")
+        Gap(12)
+        StatsEntry(onOpenStats)
 
         SectionLabel("Antenna")
         Panel {
@@ -225,6 +230,21 @@ fun SettingsScreen(
             else -> Hint("Connect to a server to change these.")
         }
       }
+    }
+}
+
+/** "> STATS ........ 0:35 TODAY": the way into Stats. */
+@Composable
+private fun StatsEntry(onClick: () -> Unit) {
+    val stats by com.cathode.app.data.WatchTime.stats.collectAsState()
+    Panel(Modifier.clickable(onClick = onClick)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Osd(">", color = P60, size = 24.sp, glow = false)
+            Spacer(Modifier.width(12.dp))
+            Osd("STATS", size = 26.sp)
+            Spacer(Modifier.weight(1f))
+            Osd(formatWatch(stats.today).uppercase() + " TODAY", color = P60, size = 20.sp, glow = false)
+        }
     }
 }
 

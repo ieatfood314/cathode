@@ -50,15 +50,14 @@ offline sync there).
 
 Designed as a TV station made of your subscriptions, on a monochrome green-phosphor tube. There's one phosphor at a few brightness levels on black glass, one terminal typeface (VT323, OFL, bundled in `res/font`), and scanlines over every screen. Emphasis is reverse video (a lit block with dark text), never a second color. Only the picture is in full color: the video and the big screen on On air. Thumbnails in lists are drawn in phosphor. Every channel gets a number (CH 01, CH 02…, alphabetical) that stays the same on every screen.
 
-- **On air**: one big tube showing what to watch next on each channel. Swipe it to change channel; the picture flashes static. Under it is the **guide**, one row per channel, where each block is as wide as the video is long. Filters: all, unwatched, on phone. Long-press anything for its menu.
+- **On air**: one big tube showing what to watch next on each channel. Swipe it to change channel; the picture breaks into static as you drag and tunes in as the next channel lands. Under it is the **guide**, one row per channel, where each block is as wide as the video is long. Filters: all, unwatched, on phone. Long-press anything for its menu.
 - **Lineup**: the channels you follow, numbered. Ones with nothing on the server right now are listed under *Off air*.
-- **Ratings**: watch time (see below), with today on a VCR-style counter, an LED bar chart of the last two weeks and each channel's share of the last 30 days.
-- **Setup**: settings, with terminal-style `ON`/`OFF` toggles and `(*)` radio buttons.
+- **Setup**: settings, with terminal-style `ON`/`OFF` toggles and `(*)` radio buttons. **Stats** sits at the top of Setup: watch time (see below), with today on a VCR-style counter, an LED bar chart of the last two weeks and each channel's share of the last 30 days.
 - The player shows the channel banner when a program starts, then *Later on this channel* and *Also on air*. While you browse, a now-playing strip sits above the dial.
 
 **Saving to the phone** runs in the background: new uploads are saved after every sync (including the phone's own background sync), and a tapped **Save to phone** keeps going after you close the app. Each library row shows the channel and when the video was uploaded. For saves to run to the end with a progress notification, turn on Settings → **Background downloads** → Allow (this lifts Android's battery optimization for Cathode). Without that, Android stops a background save after about 10 minutes, and it resumes from the same spot next time.
 
-**Ratings** shows how long you've actually spent watching: today, the last 7 days, a daily average, all time, a two-week chart and your top channels. Only time spent playing counts (not paused or buffering), and time watched offline is added once the phone is back on Wi-Fi. The web UI's player counts too.
+**Stats** (Setup → Stats) shows how long you've actually spent watching: today, the last 7 days, a daily average, all time, a two-week chart and your top channels. Only time spent playing counts (not paused or buffering), and time watched offline is added once the phone is back on Wi-Fi. The web UI's player counts too.
 
 **Install via [Obtainium](https://apps.obtainium.imranr.dev/)** (update tracking, no store needed): add app → source GitHub → `https://github.com/ieatfood314/cathode` — it picks up each release APK automatically. Or download the APK from the [releases page](../../releases) and install directly.
 

@@ -5,6 +5,15 @@ import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
@@ -161,22 +170,11 @@ fun SubscriptionsScreen(serverUrl: String, lineup: Lineup = Lineup(emptyList()))
                 Gap(16)
             }
 
-            OutlinedTextField(
+            TunePrompt(
                 value = newUrl,
-                onValueChange = { newUrl = it },
-                placeholder = { Text("Channel link or @handle") },
-                label = { Osd("TUNE IN", size = 18.sp, glow = false) },
-                singleLine = true,
-                enabled = ready,
-                shape = RoundedCornerShape(14.dp),
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                keyboardActions = KeyboardActions(onDone = { add() }),
-                trailingIcon = {
-                    IconButton(onClick = { add() }, enabled = !busy && ready && newUrl.isNotBlank()) {
-                        Icon(Icons.Default.Add, contentDescription = "Add channel")
-                    }
-                },
-                modifier = Modifier.fillMaxWidth(),
+                onValue = { newUrl = it },
+                enabled = ready && !busy,
+                onAdd = { add() },
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = { picker.launch("*/*") }, enabled = !busy && ready) {
@@ -219,6 +217,62 @@ fun SubscriptionsScreen(serverUrl: String, lineup: Lineup = Lineup(emptyList()))
         Gap(24)
     }
     if (showHelp) ImportHelp(onDismiss = { showHelp = false })
+}
+
+/**
+ * "> channel link or @handle  [ADD]": a terminal prompt. ADD lights once
+ * there's something to add; tapped while empty it puts the cursor in the
+ * field instead of doing nothing.
+ */
+@Composable
+private fun TunePrompt(value: String, onValue: (String) -> Unit, enabled: Boolean, onAdd: () -> Unit) {
+    val focus = remember { FocusRequester() }
+    var focused by remember { mutableStateOf(false) }
+    val ready = value.isNotBlank()
+    Osd("TUNE IN", color = P60, size = 19.sp, glow = false)
+    Gap(4)
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .border(1.dp, if (focused) P100 else P40, RoundedCornerShape(4.dp))
+            .background(Tube1)
+            .clickable(enabled = enabled) { focus.requestFocus() }
+            .padding(start = 12.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Osd(">", color = if (focused) P100 else P60, size = 26.sp, glow = focused)
+        Spacer(Modifier.width(10.dp))
+        BasicTextField(
+            value = value,
+            onValueChange = onValue,
+            enabled = enabled,
+            singleLine = true,
+            textStyle = TextStyle(fontFamily = Vt, fontSize = 24.sp, color = P100),
+            cursorBrush = SolidColor(P100),
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done, keyboardType = KeyboardType.Uri),
+            keyboardActions = KeyboardActions(onDone = { if (ready) onAdd() }),
+            modifier = Modifier
+                .weight(1f)
+                .focusRequester(focus)
+                .onFocusChanged { focused = it.isFocused },
+            decorationBox = { inner ->
+                Box(contentAlignment = Alignment.CenterStart) {
+                    if (value.isEmpty()) Osd("CHANNEL LINK OR @HANDLE", color = P40, size = 22.sp, glow = false)
+                    inner()
+                }
+            },
+        )
+        Spacer(Modifier.width(8.dp))
+        Box(
+            Modifier
+                .border(1.dp, if (ready) P100 else P40)
+                .background(if (ready && enabled) P100 else Color.Transparent)
+                .clickable(enabled = enabled) { if (ready) onAdd() else focus.requestFocus() }
+                .padding(horizontal = 12.dp, vertical = 4.dp),
+        ) {
+            Osd("ADD", color = if (ready && enabled) OnPhosphor else P40, size = 22.sp, glow = false)
+        }
+    }
 }
 
 @Composable
