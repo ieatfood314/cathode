@@ -16,7 +16,7 @@ from . import db as dbmod
 from .config import settings
 from .poller import poller
 from .subscriptions import Subscription, load_subscriptions, normalize_channel_input, parse_opml, parse_takeout_csv
-from .web import PAGE as WEB_PAGE
+from .web import ASSETS as WEB_ASSETS, PAGE as WEB_PAGE, STATIC as WEB_STATIC
 
 CHUNK = 1024 * 1024
 
@@ -503,5 +503,14 @@ def thumb(video_id: str):
 
 @app.get("/", response_class=HTMLResponse)
 def webapp():
-    """Desktop companion UI (same library + settings as the app)."""
+    """Web UI: same library, settings and look as the app."""
     return WEB_PAGE
+
+
+@app.get("/assets/{name}")
+def web_asset(name: str):
+    """The web UI's own files (fixed list, so no path tricks)."""
+    if name not in WEB_ASSETS:
+        raise HTTPException(404, "no such asset")
+    return FileResponse(WEB_STATIC / name, media_type=WEB_ASSETS[name],
+                        headers={"Cache-Control": "no-cache"})

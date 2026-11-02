@@ -35,10 +35,14 @@ cp .env.example .env
 curl -X POST http://<your-nas>:8000/api/subscriptions/refresh
 ```
 
-Open `http://<your-nas>:8000/api/feed` — your library as JSON — or just open
-`http://<your-nas>:8000/` in a desktop browser for the minimal web UI
-(same library, player, and settings as the app; handy on a computer, no
-offline sync there).
+Open `http://<your-nas>:8000/api/feed` for your library as JSON, or open
+`http://<your-nas>:8000/` in any browser for the web UI. It has the app's
+phosphor-tube design and pages: On air (swipe, drag or use ←/→ to change
+channel, Enter to watch), the guide, Lineup with import, and Setup with every
+server setting plus Stats. The video keeps playing in a mini strip while you
+browse, and progress and watch time sync like the phone. There's no offline
+sync on the web. The page is plain HTML/CSS/JS in `server/app/static/`, with
+no build step.
 
 ### Free subscription export (no Premium)
 

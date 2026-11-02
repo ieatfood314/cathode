@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#030604">
+<title>Cathode</title>
+<link rel="preload" href="/assets/vt323.ttf" as="font" type="font/ttf" crossorigin>
+<link rel="stylesheet" href="/assets/cathode.css">
+</head>
+<body>
+<!-- The tube draws list thumbnails in phosphor: same matrix as the app. -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <filter id="phosphor" color-interpolation-filters="sRGB">
+    <feColorMatrix type="matrix" values="0.10 0.20 0.04 0 0  0.45 0.95 0.18 0 0  0.20 0.42 0.08 0 0  0 0 0 1 0"/>
+  </filter>
+</svg>
+
+<div id="crt">
+  <header id="top">
+    <a href="#/air" class="wordmark lit">CATHODE</a>
+    <nav id="dial">
+      <a href="#/air" data-tab="air">On air</a>
+      <a href="#/lineup" data-tab="lineup">Lineup</a>
+      <a href="#/setup" data-tab="setup">Setup</a>
+    </nav>
+    <div class="station">
+      <span id="status" class="rev">TUNING</span>
+      <span id="clock" class="lit">--:--</span>
+    </div>
+  </header>
+
+  <main id="view"></main>
+
+  <!-- The set: one video element for the whole page. Big on the watch
+       page; a mini strip while you browse, so playback never stops. -->
+  <section id="set" hidden>
+    <div class="bezel">
+      <video id="vid" playsinline preload="metadata" controls></video>
+      <div id="flash" class="flash" hidden><b class="lit"></b><span class="lit"></span></div>
+    </div>
+    <div class="mini-info" id="miniInfo">
+      <div class="mini-text"><span class="dim" id="miniCh"></span><span class="lit" id="miniTitle"></span></div>
+      <button class="icon" id="miniPlay" aria-label="Play or pause">▶</button>
+      <button class="icon" id="miniClose" aria-label="Stop">✕</button>
+      <div class="mini-progress"><i id="miniBar"></i></div>
+    </div>
+  </section>
+</div>
+
+<div id="sheet" class="sheet" hidden></div>
+<div id="glass" aria-hidden="true"></div>
+
+<script src="/assets/cathode.js"></script>
+</body>
+</html>
