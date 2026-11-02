@@ -17,17 +17,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Tune
-import androidx.compose.material.icons.outlined.LiveTv
-import androidx.compose.material.icons.outlined.ViewList
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -39,8 +33,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -84,21 +76,18 @@ fun NowPlayingBar(
             delay(500)
         }
     }
-    val color = channelColor(video.channelTitle)
-    val shape = RoundedCornerShape(16.dp)
+    val shape = RoundedCornerShape(6.dp)
     Box(
         Modifier
             .fillMaxWidth()
             .padding(horizontal = 10.dp, vertical = 6.dp)
             .clip(shape)
-            .background(Glass2)
-            .border(1.dp, Glass3, shape)
+            .background(Tube1)
+            .border(1.dp, P40, shape)
             .clickable(onClick = onExpand)
     ) {
         Row(Modifier.fillMaxWidth().padding(6.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                Modifier.size(width = 72.dp, height = 44.dp).clip(RoundedCornerShape(10.dp)).background(Glass3)
-            ) {
+            Box(Modifier.size(width = 72.dp, height = 44.dp).clip(RoundedCornerShape(4.dp)).background(Tube2)) {
                 AsyncImage(
                     model = thumb, contentDescription = null, contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize().scanlines(0.3f),
@@ -106,11 +95,8 @@ fun NowPlayingBar(
             }
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
-                Osd("CH ${lineup.label(video.channelTitle)} · NOW", color = color, size = 15.sp, glow = false)
-                Text(
-                    video.title.orEmpty(), style = MaterialTheme.typography.bodyMedium, color = Ink,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis,
-                )
+                Osd("CH ${lineup.label(video.channelTitle)} · NOW", color = P60, size = 17.sp, glow = false)
+                Osd(video.title.orEmpty(), size = 21.sp, overflow = TextOverflow.Ellipsis)
             }
             IconButton(onClick = {
                 val p = Playback.current ?: return@IconButton
@@ -118,50 +104,42 @@ fun NowPlayingBar(
             }) {
                 Icon(
                     if (playing) Icons.Default.Pause else Icons.Default.PlayArrow,
-                    contentDescription = if (playing) "Pause" else "Play", tint = Ink,
+                    contentDescription = if (playing) "Pause" else "Play", tint = P100,
                 )
             }
             IconButton(onClick = onClose) {
-                Icon(Icons.Default.Close, contentDescription = "Stop", tint = Muted)
+                Icon(Icons.Default.Close, contentDescription = "Stop", tint = P60)
             }
         }
-        Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(2.dp).background(Glass3)) {
-            Box(Modifier.fillMaxWidth(progress).fillMaxHeight().background(color))
+        Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(2.dp).background(P10)) {
+            Box(Modifier.fillMaxWidth(progress).fillMaxHeight().background(P100))
         }
     }
 }
 
-/** The station's dial: four buttons, the lit one glows. */
+/** The OSD menu bar: four words, the active one lit. */
 @Composable
 fun Dial(tab: Int, onTab: (Int) -> Unit) {
-    Column(Modifier.fillMaxWidth().background(Glass).navigationBarsPadding()) {
-        Box(Modifier.fillMaxWidth().height(1.dp).background(Hairline))
-        Row(Modifier.fillMaxWidth().height(62.dp)) {
-            DialButton(Icons.Outlined.LiveTv, "On air", tab == 0) { onTab(0) }
-            DialButton(Icons.Outlined.ViewList, "Lineup", tab == 1) { onTab(1) }
-            DialButton(Icons.Default.BarChart, "Ratings", tab == 4) { onTab(4) }
-            DialButton(Icons.Default.Tune, "Setup", tab == 3) { onTab(3) }
+    Column(Modifier.fillMaxWidth().background(Tube).navigationBarsPadding()) {
+        Box(Modifier.fillMaxWidth().height(1.dp).background(P20))
+        Row(
+            Modifier.fillMaxWidth().height(58.dp).padding(horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            DialButton("On air", tab == 0) { onTab(0) }
+            DialButton("Lineup", tab == 1) { onTab(1) }
+            DialButton("Ratings", tab == 4) { onTab(4) }
+            DialButton("Setup", tab == 3) { onTab(3) }
         }
     }
 }
 
 @Composable
-private fun androidx.compose.foundation.layout.RowScope.DialButton(
-    icon: ImageVector, label: String, on: Boolean, onClick: () -> Unit,
-) {
-    Column(
+private fun androidx.compose.foundation.layout.RowScope.DialButton(label: String, on: Boolean, onClick: () -> Unit) {
+    Box(
         Modifier.weight(1f).fillMaxHeight().clickable(onClick = onClick),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center,
+        contentAlignment = Alignment.Center,
     ) {
-        // A lit pilot light over the active button.
-        Box(
-            Modifier.size(width = 18.dp, height = 3.dp).clip(RoundedCornerShape(2.dp))
-                .background(if (on) Phosphor else Color.Transparent)
-        )
-        Spacer(Modifier.height(6.dp))
-        Icon(icon, null, tint = if (on) Phosphor else Faint, modifier = Modifier.size(22.dp))
-        Spacer(Modifier.height(2.dp))
-        Osd(label.uppercase(), color = if (on) Phosphor else Faint, size = 15.sp, glow = on)
+        Reverse(label.uppercase(), size = 23.sp, on = on)
     }
 }

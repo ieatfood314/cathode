@@ -149,16 +149,15 @@ fun SubscriptionsScreen(serverUrl: String, lineup: Lineup = Lineup(emptyList()))
     Column(
         Modifier
             .fillMaxSize()
-            .background(Glass)
+            .background(Tube)
             .verticalScroll(rememberScrollState())
     ) {
-        ColorBars(height = 3.dp)
         Column(Modifier.padding(horizontal = 20.dp).padding(top = 18.dp)) {
             ScreenTitle("Lineup", kicker = if (inputs.isEmpty()) "Channels" else "${inputs.size} channels")
             Gap(18)
 
             if (!ready) {
-                Hint("Set a server address in Setup first.", color = BarYellow)
+                Osd("! SET A SERVER ADDRESS IN SETUP FIRST", color = P80, size = 19.sp, glow = false)
                 Gap(16)
             }
 
@@ -166,7 +165,7 @@ fun SubscriptionsScreen(serverUrl: String, lineup: Lineup = Lineup(emptyList()))
                 value = newUrl,
                 onValueChange = { newUrl = it },
                 placeholder = { Text("Channel link or @handle") },
-                label = { Osd("TUNE IN", size = 16.sp, glow = false, color = Phosphor) },
+                label = { Osd("TUNE IN", size = 18.sp, glow = false) },
                 singleLine = true,
                 enabled = ready,
                 shape = RoundedCornerShape(14.dp),
@@ -184,12 +183,12 @@ fun SubscriptionsScreen(serverUrl: String, lineup: Lineup = Lineup(emptyList()))
                     Text("Import file")
                 }
                 IconButton(onClick = { showHelp = true }) {
-                    Icon(Icons.Outlined.Info, contentDescription = "How to import", tint = Muted)
+                    Icon(Icons.Outlined.Info, contentDescription = "How to import", tint = P60)
                 }
                 if (busy) {
                     CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
                 } else if (message != null) {
-                    Osd(message!!.uppercase(), size = 17.sp, glow = false)
+                    Osd(message!!.uppercase(), size = 19.sp, glow = false)
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -204,15 +203,15 @@ fun SubscriptionsScreen(serverUrl: String, lineup: Lineup = Lineup(emptyList()))
         val all = inputs.map { it to (it.title ?: titles[it.sourceUrl] ?: it.channelId ?: it.sourceUrl) }
         val (onAir, offAir) = all.partition { lineup.number(it.second) != null }
         for ((s, name) in onAir.sortedBy { lineup.number(it.second) }) {
-            ChannelRow(s, name, lineup.label(name), channelColor(name), busy) {
+            ChannelRow(s, name, lineup.label(name), busy) {
                 runOp("remove") { removeChannel(serverUrl, s.sourceUrl); "Removed" }
             }
         }
         if (offAir.isNotEmpty()) {
             // Followed, but nothing kept on the server right now.
-            SectionLabel("Off air", Modifier.padding(horizontal = 20.dp), color = Faint)
+            SectionLabel("Off air", Modifier.padding(horizontal = 20.dp), color = P60)
             for ((s, name) in offAir.sortedBy { it.second.lowercase() }) {
-                ChannelRow(s, name, null, Faint, busy) {
+                ChannelRow(s, name, null, busy) {
                     runOp("remove") { removeChannel(serverUrl, s.sourceUrl); "Removed" }
                 }
             }
@@ -223,31 +222,28 @@ fun SubscriptionsScreen(serverUrl: String, lineup: Lineup = Lineup(emptyList()))
 }
 
 @Composable
-private fun ChannelRow(s: SubInput, name: String, number: String?, color: Color, busy: Boolean, onRemove: () -> Unit) {
+private fun ChannelRow(s: SubInput, name: String, number: String?, busy: Boolean, onRemove: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().heightIn(min = 60.dp).padding(start = 20.dp, end = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (number != null) {
-            Osd(number, color = color, size = 30.sp, modifier = Modifier.width(44.dp))
-            Box(Modifier.size(width = 3.dp, height = 30.dp).background(color))
-            Spacer(Modifier.width(14.dp))
-        }
+        Osd(number ?: "--", color = if (number != null) P100 else P40, size = 34.sp,
+            glow = number != null, modifier = Modifier.width(50.dp))
         Column(Modifier.weight(1f)) {
-            Text(
-                name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                color = if (number != null) Ink else Muted,
+            Osd(
+                name.uppercase(), size = 23.sp, overflow = TextOverflow.Ellipsis,
+                color = if (number != null) P100 else P60, glow = false,
             )
-            originLabel(s.origin)?.let { Hint(it) }
+            originLabel(s.origin)?.let { Osd(it.uppercase(), color = P40, size = 17.sp, glow = false) }
         }
         // Imported channels come and go with their file.
         if (s.origin == "manual") {
             IconButton(onClick = onRemove, enabled = !busy) {
-                Icon(Icons.Default.Close, contentDescription = "Remove", tint = Muted)
+                Icon(Icons.Default.Close, contentDescription = "Remove", tint = P60)
             }
         }
     }
-    Box(Modifier.padding(start = 20.dp).fillMaxWidth().height(1.dp).background(Hairline))
+    Box(Modifier.padding(start = 20.dp).fillMaxWidth().height(1.dp).background(P10))
 }
 
 @Composable

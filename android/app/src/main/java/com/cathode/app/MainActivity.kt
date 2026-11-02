@@ -48,7 +48,8 @@ import com.cathode.app.player.StreamCache
 import com.cathode.app.ui.CathodeTheme
 import androidx.compose.ui.unit.sp
 import com.cathode.app.ui.PowerOn
-import com.cathode.app.ui.Glass
+import com.cathode.app.ui.Tube
+import com.cathode.app.ui.CrtScreen
 import com.cathode.app.ui.Lineup
 import com.cathode.app.ui.nowShowing
 import com.cathode.app.ui.NowPlayingBar
@@ -75,6 +76,8 @@ class MainActivity : ComponentActivity() {
     }
 
     private val showPlayerRequests = mutableIntStateOf(0)
+    // Read above the theme too: fullscreen video turns the CRT overlay off.
+    private val fullscreenState = mutableStateOf(false)
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
@@ -87,7 +90,7 @@ class MainActivity : ComponentActivity() {
         val startOnPlayer = intent?.getBooleanExtra(EXTRA_SHOW_PLAYER, false) == true
 
         setContent {
-            CathodeTheme { PowerOn {
+            CathodeTheme { PowerOn { CrtScreen(enabled = !fullscreenState.value) {
                 val scope = rememberCoroutineScope()
                 val appContext = LocalContext.current.applicationContext
                 // null until DataStore has loaded: a blank URL then means
@@ -106,7 +109,7 @@ class MainActivity : ComponentActivity() {
                 var openUri by remember { mutableStateOf<Uri?>(null) }
                 // Hoisted from PlayerScreen: fullscreen hides the nav bar so
                 // the video fills the whole screen edge-to-edge.
-                var playerFullscreen by remember { mutableStateOf(false) }
+                var playerFullscreen by fullscreenState
                 var server by remember { mutableStateOf<ServerSettings?>(null) }
                 var serverDirty by remember { mutableStateOf(false) }
                 var serverLoading by remember { mutableStateOf(false) }
@@ -348,7 +351,7 @@ class MainActivity : ComponentActivity() {
 
                 val lineup = remember(videos) { Lineup.of(videos) }
                 Scaffold(
-                    containerColor = Glass,
+                    containerColor = Tube,
                     bottomBar = {
                         // Hidden in fullscreen so the video fills the screen.
                         if (!playerFullscreen) Column {
@@ -489,7 +492,7 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 }
-            } }
+            } } }
         }
     }
 }
@@ -498,7 +501,7 @@ class MainActivity : ComponentActivity() {
 private fun NothingPlaying(onBrowse: () -> Unit) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            com.cathode.app.ui.Osd("NO SIGNAL", size = 36.sp)
+            com.cathode.app.ui.Reverse("NO SIGNAL", size = 40.sp)
             androidx.compose.material3.TextButton(onClick = onBrowse) { Text("Back to On Air") }
         }
     }

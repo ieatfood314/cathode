@@ -54,6 +54,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
@@ -117,6 +118,8 @@ fun PlayerScreen(
 
     // Save progress on leaving (tab switch, app close). While playing,
     // Playback's own saver keeps it fresh every few seconds.
+    // Leaving the player: the screen-wide scanlines cover everything again.
+    DisposableEffect(Unit) { onDispose { VideoHole.rect = null } }
     DisposableEffect(player, video.id) {
         onDispose {
             // A released player throws on reads; -1 means it was already
@@ -243,7 +246,8 @@ fun PlayerScreen(
                         view.keepScreenOn = playing
                     },
                     onRelease = { view -> view.player = null },
-                    modifier = videoModifier,
+                    // The screen-wide scanlines skip the picture itself.
+                    modifier = videoModifier.videoHole(),
                 )
             }
             SeekFeedback(seekSide, seekVisible, seekSeconds, videoModifier)
@@ -258,7 +262,7 @@ fun PlayerScreen(
                 ) {
                     Icon(
                         Icons.Default.Close, contentDescription = "Close player",
-                        tint = Color.White,
+                        tint = P100,
                     )
                 }
             }
@@ -289,13 +293,12 @@ private fun ChannelFlash(video: Video, lineup: Lineup, modifier: Modifier) {
                 Modifier
                     .windowInsetsPadding(WindowInsets.displayCutout)
                     .padding(top = 12.dp, end = 12.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(Color.Black.copy(alpha = 0.72f))
+                    .background(Color.Black.copy(alpha = 0.78f))
                     .padding(horizontal = 12.dp, vertical = 6.dp),
                 horizontalAlignment = Alignment.End,
             ) {
-                Osd("CH ${lineup.label(video.channelTitle)}", size = 40.sp)
-                Osd(video.channelTitle.orEmpty().uppercase(), size = 18.sp)
+                Osd("CH ${lineup.label(video.channelTitle)}", size = 48.sp)
+                Osd(video.channelTitle.orEmpty().uppercase(), size = 20.sp)
             }
         }
     }
@@ -313,63 +316,46 @@ private fun ProgramCard(
     onOpen: (Video) -> Unit,
     modifier: Modifier,
 ) {
-    val color = channelColor(video.channelTitle)
-    Column(modifier.background(Glass).verticalScroll(rememberScrollState())) {
-        // The channel's color, edge to edge, under the picture.
-        Box(Modifier.fillMaxWidth().height(3.dp).background(color))
-        Column(Modifier.padding(start = 20.dp, end = 20.dp, top = 18.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Osd("CH ${lineup.label(video.channelTitle)}", color = color, size = 22.sp)
-                Spacer(Modifier.width(10.dp))
-                Osd(
-                    video.channelTitle.orEmpty().uppercase(), color = color, size = 22.sp, glow = false,
-                    modifier = Modifier.weight(1f),
-                )
-            }
-            Gap(6)
-            Text(video.title.orEmpty(), style = MaterialTheme.typography.titleLarge, color = Ink)
+    Column(modifier.background(Tube).verticalScroll(rememberScrollState())) {
+        Box(Modifier.fillMaxWidth().height(1.dp).background(P40))
+        Column(Modifier.padding(start = 20.dp, end = 20.dp, top = 16.dp)) {
+            Osd(
+                "CH ${lineup.label(video.channelTitle)}  ${video.channelTitle.orEmpty().uppercase()}",
+                color = P60, size = 22.sp, glow = false,
+            )
+            Osd(video.title.orEmpty(), size = 32.sp, maxLines = 4, overflow = TextOverflow.Ellipsis)
             Gap(12)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (video.duration > 0) Chip(formatDuration(video.duration))
                 uploadedLabel(video)?.let { Chip(it.uppercase()) }
                 when {
-                    saveState is SaveState.Saving -> Chip("REC ${(saveState.fraction * 100).toInt()}%", Signal)
-                    saveState is SaveState.Queued -> Chip("QUEUED", BarYellow)
-                    onPhone -> Chip("ON PHONE", Phosphor)
+                    saveState is SaveState.Saving -> Reverse("● REC ${(saveState.fraction * 100).toInt()}%", size = 20.sp, blink = true)
+                    saveState is SaveState.Queued -> Chip("QUEUED")
+                    onPhone -> Reverse("ON PHONE", size = 20.sp)
                 }
             }
         }
         if (upNext.isNotEmpty()) {
-            SectionLabel(
-                "Later on CH ${lineup.label(video.channelTitle)}",
-                Modifier.padding(horizontal = 20.dp),
-                color = color,
-            )
-            for (v in upNext) UpNextRow(v, thumbUrl(v), color, null) { onOpen(v) }
+            SectionLabel("Later on CH ${lineup.label(video.channelTitle)}", Modifier.padding(horizontal = 20.dp))
+            for (v in upNext) UpNextRow(v, thumbUrl(v), null) { onOpen(v) }
         }
         if (alsoOnAir.isNotEmpty()) {
             SectionLabel("Also on air", Modifier.padding(horizontal = 20.dp))
-            for (v in alsoOnAir) {
-                UpNextRow(v, thumbUrl(v), channelColor(v.channelTitle), lineup.label(v.channelTitle)) { onOpen(v) }
-            }
+            for (v in alsoOnAir) UpNextRow(v, thumbUrl(v), lineup.label(v.channelTitle)) { onOpen(v) }
         }
         Gap(24)
     }
 }
 
 @Composable
-private fun Chip(text: String, color: Color = Muted) {
-    Box(
-        Modifier
-            .border(1.dp, color.copy(alpha = 0.5f), RoundedCornerShape(6.dp))
-            .padding(horizontal = 8.dp, vertical = 3.dp)
-    ) {
-        Osd(text, color = color, size = 17.sp, glow = false)
+private fun Chip(text: String) {
+    Box(Modifier.border(1.dp, P40).padding(horizontal = 6.dp)) {
+        Osd(text, color = P80, size = 20.sp, glow = false)
     }
 }
 
 @Composable
-private fun UpNextRow(v: Video, thumb: String, color: Color, channel: String?, onClick: () -> Unit) {
+private fun UpNextRow(v: Video, thumb: String, channel: String?, onClick: () -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()
@@ -380,32 +366,30 @@ private fun UpNextRow(v: Video, thumb: String, color: Color, channel: String?, o
         Box(
             Modifier
                 .size(width = 112.dp, height = 63.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .background(Glass2)
+                .clip(RoundedCornerShape(4.dp))
+                .background(Tube2)
+                .border(1.dp, P20, RoundedCornerShape(4.dp))
         ) {
             AsyncImage(
                 model = thumb, contentDescription = null, contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize().scanlines(0.25f),
+                colorFilter = PhosphorTint,
+                modifier = Modifier.fillMaxSize().alpha(0.8f).scanlines(0.3f),
             )
             val f = watchFraction(v)
             if (f > 0f) {
-                Box(Modifier.align(Alignment.BottomStart).fillMaxWidth(f).height(3.dp).background(color))
+                Box(Modifier.align(Alignment.BottomStart).fillMaxWidth(f).height(3.dp).background(P100))
             }
         }
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
             if (channel != null) {
-                Osd("CH $channel  ${v.channelTitle.orEmpty().uppercase()}", color = color, size = 15.sp, glow = false)
+                Osd("CH $channel  ${v.channelTitle.orEmpty().uppercase()}", color = P60, size = 17.sp, glow = false)
             }
-            Text(
-                v.title.orEmpty(), style = MaterialTheme.typography.bodyMedium, color = Ink,
-                maxLines = 2, overflow = TextOverflow.Ellipsis,
-            )
-            Gap(2)
+            Osd(v.title.orEmpty(), size = 21.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, glow = false)
             Osd(
                 listOfNotNull(formatDuration(v.duration).ifEmpty { null }, uploadedLabel(v)?.uppercase())
-                    .joinToString("  ·  "),
-                color = Muted, size = 16.sp, glow = false,
+                    .joinToString(" · "),
+                color = P60, size = 17.sp, glow = false,
             )
         }
     }

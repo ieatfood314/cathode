@@ -78,33 +78,32 @@ fun StatsScreen(canRefresh: Boolean, notice: String?, lineup: Lineup = Lineup(em
     Column(
         Modifier
             .fillMaxSize()
-            .background(Glass)
+            .background(Tube)
             .verticalScroll(rememberScrollState())
+            .padding(horizontal = 20.dp)
+            .padding(top = 16.dp)
     ) {
-        ColorBars(height = 3.dp)
-        Column(Modifier.padding(horizontal = 20.dp).padding(top = 18.dp)) {
-            ScreenTitle("Ratings", kicker = "Your viewing")
-            (notice ?: error)?.let { Hint(it, Modifier.padding(top = 4.dp), color = BarYellow) }
-            Gap(20)
-            Counter(stats.today)
-            Gap(16)
-            Panel {
-                Row(Modifier.fillMaxWidth()) {
-                    StatCell("7 days", stats.week, Modifier.weight(1f))
-                    StatCell("Daily avg", stats.dailyAvg, Modifier.weight(1f))
-                    StatCell("All time", stats.allTime, Modifier.weight(1f))
-                }
+        ScreenTitle("Ratings", kicker = "Your viewing")
+        (notice ?: error)?.let { Osd("! " + it.uppercase(), color = P80, size = 18.sp, glow = false, maxLines = 2) }
+        Gap(18)
+        Counter(stats.today)
+        Gap(14)
+        Panel {
+            Row(Modifier.fillMaxWidth()) {
+                StatCell("7 days", stats.week, Modifier.weight(1f))
+                StatCell("Daily avg", stats.dailyAvg, Modifier.weight(1f))
+                StatCell("All time", stats.allTime, Modifier.weight(1f))
             }
-            if (stats.days.isNotEmpty()) {
-                SectionLabel("Last 14 days")
-                Panel { DayChart(stats.days) }
-            }
-            if (stats.channels.isNotEmpty()) {
-                SectionLabel("Share · 30 days")
-                Panel { Share(stats.channels, lineup) }
-            }
-            Gap(24)
         }
+        if (stats.days.isNotEmpty()) {
+            SectionLabel("Last 14 days")
+            DayChart(stats.days)
+        }
+        if (stats.channels.isNotEmpty()) {
+            SectionLabel("Share · 30 days")
+            Share(stats.channels, lineup)
+        }
+        Gap(24)
     }
 }
 
@@ -114,30 +113,25 @@ private fun Counter(seconds: Double) {
     val total = seconds.toLong()
     val h = total / 3600
     val m = (total % 3600) / 60
-    val shape = RoundedCornerShape(22.dp)
+    val shape = RoundedCornerShape(6.dp)
     Box(
         Modifier
             .fillMaxWidth()
             .clip(shape)
-            .background(Color(0xFF050706))
-            .border(1.dp, Glass3, shape)
-            .scanlines(0.35f)
-            .padding(horizontal = 22.dp, vertical = 18.dp)
+            .background(Tube1)
+            .border(1.dp, P20, shape)
+            .padding(horizontal = 20.dp, vertical = 14.dp)
     ) {
         Column {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(8.dp).clip(RoundedCornerShape(50)).background(if (seconds > 0) Signal else Faint))
-                Spacer(Modifier.width(8.dp))
-                Osd("TODAY", size = 20.sp, color = if (seconds > 0) Ink else Muted, glow = false)
+                if (seconds > 0) Reverse("● TODAY", size = 21.sp) else Osd("TODAY", color = P60, size = 21.sp, glow = false)
                 Spacer(Modifier.weight(1f))
-                Osd("H  MM", size = 18.sp, color = PhosphorDim, glow = false)
+                Osd("H  MM", size = 20.sp, color = P40, glow = false)
             }
-            Row(verticalAlignment = Alignment.Bottom) {
-                // Ghost segments behind the lit ones, like an LCD/VFD readout.
-                Box {
-                    Osd("88:88", size = 104.sp, color = Phosphor.copy(alpha = 0.07f), glow = false)
-                    Osd("%d:%02d".format(h, m).padStart(5, ' '), size = 104.sp)
-                }
+            Box {
+                // Unlit segments behind the lit ones, like a VFD readout.
+                Osd("88:88", size = 120.sp, color = P10, glow = false)
+                Osd("%d:%02d".format(h, m).padStart(5, ' '), size = 120.sp)
             }
         }
     }
@@ -146,14 +140,14 @@ private fun Counter(seconds: Double) {
 @Composable
 private fun StatCell(label: String, seconds: Double, modifier: Modifier) {
     Column(modifier) {
-        Osd(formatWatch(seconds), size = 30.sp, color = Ink, glow = false)
-        Hint(label)
+        Osd(formatWatch(seconds).uppercase(), size = 30.sp)
+        Osd(label.uppercase(), color = P60, size = 18.sp, glow = false)
     }
 }
 
 /**
- * One column per day, today on the right. Tap a column to read its value;
- * the selected one glows, the rest are dim phosphor.
+ * One LED column per day, today on the right. Tap a column to read it;
+ * the selected one is fully lit, the others dim.
  */
 @Composable
 private fun DayChart(days: List<Pair<LocalDate, Double>>) {
@@ -162,17 +156,16 @@ private fun DayChart(days: List<Pair<LocalDate, Double>>) {
     val sel = days.firstOrNull { it.first == selected } ?: days.last()
     val max = days.maxOf { it.second }.coerceAtLeast(60.0)
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text(dayLabel(sel.first, today), Modifier.weight(1f), color = Muted, style = MaterialTheme.typography.bodyMedium)
-        Osd(formatWatch(sel.second), size = 24.sp)
+        Osd(dayLabel(sel.first, today).uppercase(), Modifier.weight(1f), color = P60, size = 21.sp, glow = false)
+        Osd(formatWatch(sel.second).uppercase(), size = 28.sp)
     }
-    Gap(12)
-    Row(
-        Modifier.fillMaxWidth().height(132.dp).scanlines(0.4f, 2.dp),
-        horizontalArrangement = Arrangement.spacedBy(3.dp),
-    ) {
+    Gap(10)
+    val levels = 16
+    Row(Modifier.fillMaxWidth().height(140.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         for ((day, secs) in days) {
             val on = day == sel.first
-            Box(
+            val lit = if (secs <= 0) 0 else ((secs / max) * levels).toInt().coerceIn(1, levels)
+            Column(
                 Modifier
                     .weight(1f)
                     .fillMaxHeight()
@@ -180,74 +173,54 @@ private fun DayChart(days: List<Pair<LocalDate, Double>>) {
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
                     ) { selected = day },
-                contentAlignment = Alignment.BottomCenter,
+                verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
-                // Empty days still show a dim floor tick.
-                Box(Modifier.fillMaxWidth().height(2.dp).background(Glass3))
-                if (secs > 0) {
+                for (i in levels - 1 downTo 0) {
                     Box(
-                        Modifier
-                            .fillMaxWidth()
-                            // A watched day never shrinks to nothing.
-                            .fillMaxHeight((secs / max).toFloat().coerceIn(0.03f, 1f))
-                            .clip(RoundedCornerShape(topStart = 3.dp, topEnd = 3.dp))
-                            .background(
-                                if (on) Brush.verticalGradient(listOf(Color(0xFFD9FFE5), Phosphor))
-                                else Brush.verticalGradient(listOf(PhosphorDim, PhosphorDim.copy(alpha = 0.55f)))
-                            )
+                        Modifier.fillMaxWidth().weight(1f).background(
+                            when {
+                                i >= lit -> P10
+                                on -> P100
+                                else -> P40
+                            }
+                        )
                     )
                 }
             }
         }
     }
     Gap(6)
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         for ((day, _) in days) {
             Osd(
                 day.dayOfWeek.getDisplayName(TextStyle.NARROW, Locale.getDefault()),
                 Modifier.weight(1f),
-                size = 16.sp,
-                color = if (day == sel.first) Phosphor else Faint,
-                glow = false,
+                size = 18.sp,
+                color = if (day == sel.first) P100 else P40,
+                glow = day == sel.first,
                 textAlign = TextAlign.Center,
             )
         }
     }
 }
 
-/** Audience share: one bar split by channel, then the breakdown. */
+/** Audience share: an LED bar per channel. */
 @Composable
 private fun Share(channels: List<Pair<String, Double>>, lineup: Lineup) {
     val total = channels.sumOf { it.second }.coerceAtLeast(1.0)
-    Row(
-        Modifier.fillMaxWidth().height(16.dp).clip(RoundedCornerShape(5.dp)),
-        horizontalArrangement = Arrangement.spacedBy(2.dp),
-    ) {
-        for ((name, secs) in channels) {
-            Box(
-                Modifier.weight((secs / total).toFloat().coerceAtLeast(0.01f)).fillMaxHeight()
-                    .background(channelColor(name))
-            )
-        }
-    }
-    Gap(14)
     channels.forEachIndexed { i, (name, secs) ->
-        if (i > 0) Gap(10)
+        if (i > 0) Gap(12)
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            val color = channelColor(name)
-            Box(Modifier.size(10.dp).clip(RoundedCornerShape(2.dp)).background(color))
+            Osd(lineup.label(name), size = 22.sp)
             Spacer(Modifier.width(10.dp))
-            Osd(lineup.label(name), color = color, size = 19.sp, glow = false)
-            Spacer(Modifier.width(8.dp))
-            Text(
-                name.ifBlank { "Unknown" }, Modifier.weight(1f), maxLines = 1,
-                overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium, color = Ink,
-            )
-            Osd(formatWatch(secs), color = Muted, size = 18.sp, glow = false, modifier = Modifier.padding(start = 10.dp))
             Osd(
-                "%3d%%".format((secs / total * 100).toInt()), color = Ink, size = 18.sp, glow = false,
-                modifier = Modifier.padding(start = 10.dp),
+                name.ifBlank { "Unknown" }.uppercase(), Modifier.weight(1f),
+                color = P80, size = 21.sp, glow = false, overflow = TextOverflow.Ellipsis,
             )
+            Osd(formatWatch(secs).uppercase(), color = P60, size = 19.sp, glow = false, modifier = Modifier.padding(start = 10.dp))
+            Osd("%3d%%".format((secs / total * 100).toInt()), size = 21.sp, modifier = Modifier.padding(start = 10.dp))
         }
+        Gap(4)
+        Segments((secs / total).toFloat(), Modifier.fillMaxWidth(), cells = 30, height = 8.dp)
     }
 }

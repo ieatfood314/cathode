@@ -10,6 +10,9 @@ import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.draw.alpha
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -147,10 +150,9 @@ fun SettingsScreen(
     Column(
         Modifier
             .fillMaxSize()
-            .background(Glass)
+            .background(Tube)
             .verticalScroll(rememberScrollState())
     ) {
-      ColorBars(height = 3.dp)
       Column(Modifier.padding(horizontal = 20.dp).padding(top = 18.dp, bottom = 24.dp)) {
         ScreenTitle("Setup", kicker = "Service menu")
 
@@ -173,7 +175,7 @@ fun SettingsScreen(
             }
         }
 
-        SectionLabel("This phone", color = BarCyan)
+        SectionLabel("This phone")
         Panel {
             SwitchRow("Save videos", "Keep copies for offline playback", prefs.saveOnPhone) { on ->
                 onPrefs { it.copy(saveOnPhone = on) }
@@ -213,7 +215,7 @@ fun SettingsScreen(
         }
 
         Row(verticalAlignment = Alignment.Bottom) {
-            SectionLabel("Station", color = BarYellow)
+            SectionLabel("Station")
             Spacer(Modifier.weight(1f))
             if (serverStatus != null) Osd(serverStatus.uppercase(), Modifier.padding(bottom = 10.dp), size = 17.sp, glow = false)
         }
@@ -283,7 +285,7 @@ private fun ServerPanels(server: ServerSettings, onServer: (ServerSettings) -> U
         Gap(4)
     }
 
-    SectionLabel("SponsorBlock", color = BarMagenta)
+    SectionLabel("SponsorBlock")
     Panel {
         Text("Remove")
         Gap()
@@ -499,10 +501,10 @@ private fun SwitchRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
-            Text(label, color = if (enabled) Color.Unspecified else Muted)
+            Text(label, color = if (enabled) P100 else P40)
             if (desc != null) Hint(desc)
         }
-        Switch(checked = checked, onCheckedChange = null, enabled = enabled)
+        BlockToggle(checked && enabled, Modifier.alpha(if (enabled) 1f else 0.5f))
     }
 }
 
@@ -515,8 +517,14 @@ private fun RadioRow(label: String, selected: Boolean, enabled: Boolean = true, 
             .padding(vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        RadioButton(selected = selected, onClick = null, enabled = enabled, modifier = Modifier.padding(8.dp))
-        Text(label, Modifier.padding(start = 8.dp), color = if (enabled) Color.Unspecified else Muted)
+        // (*) / ( ): a terminal radio button.
+        Osd(
+            if (selected) "(*)" else "( )",
+            color = if (!enabled) P20 else if (selected) P100 else P60,
+            size = 22.sp, glow = selected,
+            modifier = Modifier.padding(vertical = 8.dp),
+        )
+        Text(label, Modifier.padding(start = 12.dp), color = if (!enabled) P40 else if (selected) P100 else P80)
     }
 }
 
@@ -535,12 +543,19 @@ private fun ChipGrid(
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 for ((id, label) in row) {
-                    FilterChip(
-                        selected = id in selected,
-                        onClick = { onToggle(id) },
-                        label = { Text(label, maxLines = 1) },
-                        modifier = Modifier.weight(1f),
-                    )
+                    val on = id in selected
+                    Box(
+                        Modifier
+                            .weight(1f)
+                            .padding(vertical = 4.dp)
+                            .border(1.dp, if (on) P100 else P40)
+                            .background(if (on) P100 else Color.Transparent)
+                            .clickable { onToggle(id) }
+                            .padding(vertical = 6.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Osd(label.uppercase(), color = if (on) OnPhosphor else P80, size = 19.sp, glow = false)
+                    }
                 }
                 repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
             }

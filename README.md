@@ -48,12 +48,12 @@ offline sync there).
 
 ## Android app (Obtainium)
 
-Designed as a TV station made of your subscriptions. Every channel gets a number (CH 01, CH 02… alphabetical) and a color from the test-card bars, and those stay the same on every screen. Tube-glass black, phosphor-green on-screen-display type (VT323), and Archivo for everything else (both OFL, bundled in `res/font`).
+Designed as a TV station made of your subscriptions, on a monochrome green-phosphor tube. There's one phosphor at a few brightness levels on black glass, one terminal typeface (VT323, OFL, bundled in `res/font`), and scanlines over every screen. Emphasis is reverse video (a lit block with dark text), never a second color. Only the picture is in full color: the video and the big screen on On air. Thumbnails in lists are drawn in phosphor. Every channel gets a number (CH 01, CH 02…, alphabetical) that stays the same on every screen.
 
 - **On air**: one big tube showing what to watch next on each channel. Swipe it to change channel; the picture flashes static. Under it is the **guide**, one row per channel, where each block is as wide as the video is long. Filters: all, unwatched, on phone. Long-press anything for its menu.
 - **Lineup**: the channels you follow, numbered. Ones with nothing on the server right now are listed under *Off air*.
-- **Ratings**: watch time (see below), with today on a VCR-style counter and each channel's share of the last 30 days.
-- **Setup**: settings.
+- **Ratings**: watch time (see below), with today on a VCR-style counter, an LED bar chart of the last two weeks and each channel's share of the last 30 days.
+- **Setup**: settings, with terminal-style `ON`/`OFF` toggles and `(*)` radio buttons.
 - The player shows the channel banner when a program starts, then *Later on this channel* and *Also on air*. While you browse, a now-playing strip sits above the dial.
 
 **Saving to the phone** runs in the background: new uploads are saved after every sync (including the phone's own background sync), and a tapped **Save to phone** keeps going after you close the app. Each library row shows the channel and when the video was uploaded. For saves to run to the end with a progress notification, turn on Settings → **Background downloads** → Allow (this lifts Android's battery optimization for Cathode). Without that, Android stops a background save after about 10 minutes, and it resumes from the same spot next time.
