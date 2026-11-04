@@ -23,7 +23,7 @@ The README's "How it works" and "API" sections give the big picture. This file c
 - **Every push to `main` publishes a signed release APK.** The `build` workflow names it `<versionName>.<1000 + run number>`, and Obtainium installs it.
   - To start a new version line, edit the `versionName` fallback in `android/app/build.gradle.kts`. Don't tag by hand.
   - Push when a change is ready for the phone, not halfway through.
-- **The live server's database can be lost.** The server builds from this checkout, and its database holds watch history.
+- **The live server's database can be lost.** The server is the `cathode` Docker container, built from this checkout with `docker compose up -d --build`, and its database holds watch history.
   - Back up `cathode.db` before a migration that could lose data.
   - Check `/api/health` after a rebuild.
 - **The UI copy is deliberately short.** Labels are short, explanations sit behind an (i) button, and the look is flat with one accent color. Match it.
