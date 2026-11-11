@@ -16,6 +16,7 @@ import com.cathode.app.data.AppPrefs
 import com.cathode.app.data.Library
 import com.cathode.app.data.OfflineRepo
 import com.cathode.app.data.PrefsRepo
+import com.cathode.app.data.SaveState
 import com.cathode.app.data.Video
 import com.cathode.app.data.getServerSettings
 import com.cathode.app.data.networkAllowed
@@ -64,16 +65,21 @@ class SyncWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, 
         @OptIn(UnstableApi::class)
         fun afterSync(context: Context, feed: List<Video>, prefs: AppPrefs): Int {
             val loc = resolveStore(context, prefs.storageUri)
-            val keepDays = runCatching { getServerSettings(prefs.serverUrl).keepDays }.getOrNull()
+            val server = runCatching { getServerSettings(prefs.serverUrl) }.getOrNull()
             // Never pull a copy out from under the player.
-            val expired = keepDays?.let { Library.expired(feed, it) - setOfNotNull(Playback.videoId) }.orEmpty()
+            val playing = setOfNotNull(Playback.videoId)
+            val expired = server?.let { Library.expired(feed, it.keepDays) - playing }.orEmpty()
             expired.forEach { OfflineRepo.remove(context, loc, it) }
-            if (expired.isNotEmpty()) {
-                Library.forget(context, expired)
-                OfflineRepo.rescan(context, loc)
-            }
+            if (expired.isNotEmpty()) Library.forget(context, expired)
+            // "After watching: delete from phone" waits out the grace period
+            // too, so an accidental finish doesn't take the copy with it.
+            val watched = if (!prefs.deleteAfterWatched) emptySet() else
+                Library.watchedLongAgo(server?.watchedGraceHours ?: 24) - playing - expired
+            val freed = watched.filter { OfflineRepo.stateOf(it) is SaveState.Saved }
+            freed.forEach { OfflineRepo.remove(context, loc, it) }
+            if (expired.isNotEmpty() || freed.isNotEmpty()) OfflineRepo.rescan(context, loc)
             if (prefs.saveOnPhone && prefs.autoSaveNew) DownloadWorker.saveNew(context, prefs.wifiOnly)
-            return expired.size
+            return expired.size + freed.size
         }
 
         private fun constraints(wifiOnly: Boolean) = Constraints.Builder()

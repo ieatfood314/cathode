@@ -20,6 +20,10 @@ from .web import ASSETS as WEB_ASSETS, PAGE as WEB_PAGE, STATIC as WEB_STATIC
 
 CHUNK = 1024 * 1024
 
+# Keeps the first time a video was marked watched; re-marking doesn't restart
+# the delete-after-watched countdown. Takes the current time as its parameter.
+WATCHED_AT_NOW = "watched_at=CASE WHEN watched=1 AND watched_at>0 THEN watched_at ELSE ? END"
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -59,7 +63,7 @@ def feed(limit: int = Query(100, le=5000), unwatched_only: bool = False,
     conn = _conn()
     q = ("SELECT id, channel_id, channel_title, title, upload_date, duration, "
          "file_path, thumb_path, filesize, status, published, downloaded_at, watched, "
-         "CAST(position_seconds AS INTEGER) AS position_seconds "
+         "watched_at, CAST(position_seconds AS INTEGER) AS position_seconds "
          # A done row without a file has nothing to play: never list it.
          "FROM videos WHERE status='done' AND file_path IS NOT NULL AND file_path != ''")
     args: list = []
@@ -98,7 +102,8 @@ def save_progress(video_id: str, body: ProgressIn):
     near_end = (row["duration"] or 0) > 0 and pos >= row["duration"] * 0.95 - 5
     if near_end:
         conn.execute(
-            "UPDATE videos SET position_seconds=?, watched=1 WHERE id=?", (pos, video_id))
+            "UPDATE videos SET position_seconds=?, watched=1, " + WATCHED_AT_NOW + " WHERE id=?",
+            (pos, dbmod.now(), video_id))
     else:
         conn.execute("UPDATE videos SET position_seconds=? WHERE id=?", (pos, video_id))
     conn.commit()
@@ -222,6 +227,7 @@ def get_settings():
         "keep_days": settings.keep_days,
         "backfill_days": settings.backfill_days,
         "delete_after_watched": settings.delete_after_watched,
+        "watched_grace_hours": settings.watched_grace_hours,
     }
 
 
@@ -396,31 +402,23 @@ def refresh():
 
 @app.post("/api/videos/{video_id}/watched")
 def mark_watched(video_id: str, watched: bool = True):
-    """Mark watched / unwatched by hand. Unwatched also rewinds to the start."""
+    """Mark watched / unwatched by hand. Unwatched also rewinds to the start.
+
+    With delete_after_watched on, the server file is NOT deleted here: the
+    poller frees it watched_grace_hours later, so finishing a video by
+    accident (a scrub to the end) can still be undone by unmarking it.
+    """
     conn = _conn()
     if watched:
-        conn.execute("UPDATE videos SET watched=1 WHERE id=?", (video_id,))
+        conn.execute("UPDATE videos SET watched=1, " + WATCHED_AT_NOW + " WHERE id=?",
+                     (dbmod.now(), video_id))
     else:
-        conn.execute("UPDATE videos SET watched=0, position_seconds=0 WHERE id=?", (video_id,))
+        conn.execute("UPDATE videos SET watched=0, watched_at=0, position_seconds=0 WHERE id=?",
+                     (video_id,))
     conn.commit()
-    deleted_file = False
-    if watched and settings.delete_after_watched:
-        row = conn.execute("SELECT file_path FROM videos WHERE id=?", (video_id,)).fetchone()
-        if row and row["file_path"]:
-            media_dir = Path(settings.media_dir)
-            for p in media_dir.rglob(f"*{video_id}*"):
-                try:
-                    if p.is_file():
-                        p.unlink()
-                except OSError:
-                    pass
-            conn.execute(
-                "UPDATE videos SET status='deleted', file_path='', thumb_path='', "
-                "info_path='', filesize=0 WHERE id=?", (video_id,))
-            conn.commit()
-            deleted_file = True
     conn.close()
-    return {"ok": True, "deleted_server_file": deleted_file}
+    # Kept for older apps that read it; the file is never deleted right away now.
+    return {"ok": True, "deleted_server_file": False}
 
 
 def _resolve_media(rel: str) -> Path:

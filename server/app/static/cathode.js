@@ -751,7 +751,7 @@ function setupPage() {
     '<div class="field"><div class="lbl"><span>Backfill</span></div><div class="sub">Also fetch older uploads from each channel</div>' +
     '<div class="chipgrid">' + BACKFILL.map(([d, l]) => '<button data-bf="' + d + '" class="' + (s.backfill_days === d ? 'on' : '') + '">' + l + '</button>').join('') + '</div></div>' +
     '<div class="field"><div class="toggle-row" id="daw"><div class="txt"><div class="lbl"><span>Delete from server after watching</span></div>' +
-    '<div class="sub">Phones keep their own setting for their copies</div></div><span class="toggle' + (s.delete_after_watched ? ' on' : '') + '">' +
+    '<div class="sub">A day after you finish. Phones have their own setting</div></div><span class="toggle' + (s.delete_after_watched ? ' on' : '') + '">' +
     (s.delete_after_watched ? 'ON' : 'OFF') + '</span></div></div></div>';
   const rm = splitSb(s.sponsorblock_remove);
   const mk = s.sponsorblock_mark === 'all' ? new Set(SB_ALL) : splitSb(s.sponsorblock_mark);

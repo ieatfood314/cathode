@@ -38,9 +38,12 @@ class Settings(BaseSettings):
     # Backfill: 0 = off (latest-N videos only).
     # N > 0 also grabs everything uploaded in the last N days per channel.
     backfill_days: int = 0
-    # Delete the server file once you mark a video watched (phone copies are
+    # Delete the server file once a video is watched (phone copies are
     # managed separately in the app). Off by default — destructive on a shared library.
     delete_after_watched: bool = False
+    # ...but only this long after it was marked watched, so a mis-tap that
+    # skips to the end can still be undone by unmarking it.
+    watched_grace_hours: int = 24
     max_videos_per_channel_scan: int = 10
 
     # HTTP server

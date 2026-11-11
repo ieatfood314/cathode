@@ -18,6 +18,8 @@ data class Video(
     val published: Long = 0,
     @SerialName("downloaded_at") val downloadedAt: Long = 0,
     val watched: Int = 0,
+    /** Epoch seconds it was marked watched; 0 = not watched, or marked before this existed. */
+    @SerialName("watched_at") val watchedAt: Long = 0,
     @SerialName("position_seconds") val positionSeconds: Int = 0,
 )
 
@@ -34,6 +36,8 @@ data class ServerSettings(
     @SerialName("keep_days") val keepDays: Int = 0,
     @SerialName("backfill_days") val backfillDays: Int = 0,
     @SerialName("delete_after_watched") val deleteAfterWatched: Boolean = false,
+    /** Watched copies are freed this long after being marked, so a mis-tap can be undone. */
+    @SerialName("watched_grace_hours") val watchedGraceHours: Int = 24,
 )
 
 @Serializable

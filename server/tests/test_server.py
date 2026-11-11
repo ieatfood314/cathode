@@ -157,31 +157,64 @@ def test_sponsorblock_sanitized(monkeypatch):
     assert r.json()["settings"]["sponsorblock_remove"] == "sponsor,selfpromo"
 
 
-def test_watched_deletes_server_file(monkeypatch):
+def test_watched_frees_server_file_only_after_grace(monkeypatch):
+    """Marking watched never deletes right away: a scrub to the end by
+    accident must be undoable. The poller frees it after the grace period."""
+    import time as _t
     from pathlib import Path as _P
     from fastapi.testclient import TestClient
     from app import db as dbmod
     from app.config import settings
     from app.main import app
+    from app.poller import Poller
     media = _P(settings.media_dir)
     media.mkdir(parents=True, exist_ok=True)
-    (media / "gone [abc123].mp4").write_bytes(b"data")
+    f = media / "gone [abc123].mp4"
+    f.write_bytes(b"data")
     conn = dbmod.connect(settings.db_path)
-    conn.execute("INSERT OR REPLACE INTO videos(id,status,file_path,watched) "
-                 "VALUES('abc123','done','gone [abc123].mp4',0)")
+    conn.execute("INSERT OR REPLACE INTO videos(id,status,file_path,watched,watched_at) "
+                 "VALUES('abc123','done','gone [abc123].mp4',0,0)")
     conn.commit()
     conn.close()
     monkeypatch.setattr(settings, "delete_after_watched", True)
+    monkeypatch.setattr(settings, "watched_grace_hours", 24)
     c = TestClient(app)
+
+    def row():
+        conn = dbmod.connect(settings.db_path)
+        r = conn.execute("SELECT status, watched, watched_at FROM videos WHERE id='abc123'").fetchone()
+        conn.close()
+        return r
+
+    def free():
+        conn = dbmod.connect(settings.db_path)
+        Poller()._free_watched(conn, media)
+        conn.close()
+
     r = c.post("/api/videos/abc123/watched?watched=true")
-    assert r.json()["deleted_server_file"] is True
-    assert not (media / "gone [abc123].mp4").exists()
+    assert r.json()["deleted_server_file"] is False
+    first = row()["watched_at"]
+    assert first > 0
+    free()
+    assert f.exists() and row()["status"] == "done"
+    assert any(v["id"] == "abc123" for v in c.get("/api/feed").json()["videos"])
+
+    # Re-marking keeps the original time; unmarking cancels the countdown.
+    c.post("/api/videos/abc123/watched?watched=true")
+    assert row()["watched_at"] == first
+    c.post("/api/videos/abc123/watched?watched=false")
+    assert row()["watched_at"] == 0
+
+    # Past the grace period it goes.
+    c.post("/api/videos/abc123/watched?watched=true")
     conn = dbmod.connect(settings.db_path)
-    row = conn.execute("SELECT status FROM videos WHERE id='abc123'").fetchone()
+    conn.execute("UPDATE videos SET watched_at=? WHERE id='abc123'", (int(_t.time()) - 25 * 3600,))
+    conn.commit()
     conn.close()
-    assert row["status"] == "deleted"
-    assert c.get("/api/feed").json()["videos"] == [] or all(
-        v["id"] != "abc123" for v in c.get("/api/feed").json()["videos"])
+    free()
+    assert not f.exists()
+    assert row()["status"] == "deleted"
+    assert all(v["id"] != "abc123" for v in c.get("/api/feed").json()["videos"])
 
 
 def test_normalize_channel_input():

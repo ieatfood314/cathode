@@ -112,7 +112,7 @@ The mode and interval live in Settings → Server config; the server also expose
 | GET | `/api/subscriptions` | parsed inputs + indexed channels |
 | POST | `/api/subscriptions/refresh` | starts a background scan, returns immediately (app calls on open) |
 | POST | `/api/videos/{id}/progress` | `{"position_seconds": N}`; auto-marks watched near the end, never unmarks |
-| POST | `/api/videos/{id}/watched?watched=true` | watch state (`false` also rewinds to the start) |
+| POST | `/api/videos/{id}/watched?watched=true` | watch state (`false` also rewinds to the start). With delete-after-watched on, files go `watched_grace_hours` (24) after it's marked, not right away |
 | POST | `/api/watchtime` | `{"sessions": [{id, video_id, day, seconds}]}` running totals per video per day; the larger total wins, so resending is safe |
 | GET | `/api/stats?since=YYYY-MM-DD` | watch time per day and channel since that date, plus the all-time total |
 | POST | `/api/subscriptions/upload` | `.opml` / `.csv` (replaces that file once it parses) or `.txt` (adds) |

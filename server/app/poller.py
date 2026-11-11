@@ -127,6 +127,7 @@ class Poller:
             # Every scan, not just ones that download something — otherwise a
             # quiet week never prunes anything.
             self._prune(conn, media_dir)
+            self._free_watched(conn, media_dir)
             # One-time migration: new downloads never embed cover art, so
             # once every old file has been checked there is nothing left to do.
             scaled = 0
@@ -411,6 +412,33 @@ class Poller:
                 "info_path='', filesize=0 WHERE id=?", (vid,))
         conn.commit()
         self._rmdir_empty(media_dir)
+
+    def _free_watched(self, conn: sqlite3.Connection, media_dir: Path):
+        """delete_after_watched: free files watched more than watched_grace_hours ago.
+
+        Never right when it's marked: a scrub to the end by accident marks it
+        too, and unmarking within the grace period keeps the file.
+        """
+        if not settings.delete_after_watched:
+            return
+        cutoff = int(time.time()) - max(0, settings.watched_grace_hours) * 3600
+        rows = conn.execute(
+            "SELECT id FROM videos WHERE status='done' AND watched=1 "
+            "AND watched_at>0 AND watched_at<=?", (cutoff,)).fetchall()
+        for row in rows:
+            vid = row["id"]
+            for p in media_dir.rglob(f"*{vid}*"):
+                try:
+                    if p.is_file():
+                        p.unlink()
+                except OSError:
+                    pass
+            conn.execute(
+                "UPDATE videos SET status='deleted', file_path='', thumb_path='', "
+                "info_path='', filesize=0 WHERE id=?", (vid,))
+        conn.commit()
+        if rows:
+            self._rmdir_empty(media_dir)
 
     def _rmdir_empty(self, media_dir: Path):
         for d in media_dir.iterdir():

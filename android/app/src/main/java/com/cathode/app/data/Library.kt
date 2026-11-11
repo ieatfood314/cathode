@@ -112,6 +112,21 @@ object Library {
         }.mapTo(HashSet()) { it.id }
     }
 
+    /**
+     * Watched more than [graceHours] ago: their phone copies can go. Never
+     * sooner, so finishing one by accident (a scrub to the end) can be undone
+     * by unmarking it. Same rule as the server's delete-after-watched.
+     */
+    fun watchedLongAgo(graceHours: Int): Set<String> {
+        val cutoff = System.currentTimeMillis() / 1000 - graceHours.coerceAtLeast(0) * 3_600L
+        return _videos.value.filter { it.watched == 1 && it.watchedAt in 1..cutoff }
+            .mapTo(HashSet()) { it.id }
+    }
+
+    /** Marked watched now, unless it already was (keeps the first time). */
+    private fun Video.asWatched(): Video =
+        copy(watched = 1, watchedAt = if (watched == 1 && watchedAt > 0) watchedAt else System.currentTimeMillis() / 1000)
+
     /** Drop videos from the cached library (their phone copies are already gone). */
     fun forget(context: Context, ids: Set<String>) {
         if (ids.isEmpty()) return
@@ -125,13 +140,14 @@ object Library {
     /** Where playback stopped: shown right away, sent now or queued for later. */
     suspend fun reportProgress(context: Context, id: String, pos: Int) {
         patch(context, id) { v ->
-            v.copy(positionSeconds = pos, watched = if (nearEnd(v, pos)) 1 else v.watched)
+            if (nearEnd(v, pos)) v.copy(positionSeconds = pos).asWatched()
+            else v.copy(positionSeconds = pos)
         }
         val base = target(context)
         val serverWatched = base?.let { runCatching { putProgress(it, id, pos) }.getOrNull() }
         when (serverWatched) {
             null -> queue(context, id) { it.copy(pos = pos) }
-            true -> patch(context, id) { it.copy(watched = 1) }
+            true -> patch(context, id) { it.asWatched() }
             false -> Unit
         }
     }
@@ -139,7 +155,7 @@ object Library {
     /** Watched / unwatched (unwatched also rewinds to the start). */
     suspend fun markWatched(context: Context, id: String, watched: Boolean) {
         patch(context, id) {
-            if (watched) it.copy(watched = 1) else it.copy(watched = 0, positionSeconds = 0)
+            if (watched) it.asWatched() else it.copy(watched = 0, watchedAt = 0, positionSeconds = 0)
         }
         val base = target(context)
         val sent = base != null && runCatching { setWatched(base, id, watched) }.isSuccess
@@ -181,10 +197,10 @@ object Library {
         if (op == null) return v
         var out = v
         op.watched?.let { w ->
-            out = if (w) out.copy(watched = 1) else out.copy(watched = 0, positionSeconds = 0)
+            out = if (w) out.asWatched() else out.copy(watched = 0, watchedAt = 0, positionSeconds = 0)
         }
         op.pos?.let { p ->
-            out = out.copy(positionSeconds = p, watched = if (nearEnd(out, p)) 1 else out.watched)
+            out = out.copy(positionSeconds = p).let { if (nearEnd(it, p)) it.asWatched() else it }
         }
         return out
     }

@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS videos (
   published INTEGER DEFAULT 0,
   downloaded_at INTEGER DEFAULT 0,
   watched INTEGER DEFAULT 0,
+  watched_at INTEGER DEFAULT 0,  -- when it was marked watched (0 = not, or before this column)
   position_seconds REAL DEFAULT 0,
   FOREIGN KEY(channel_id) REFERENCES channels(id)
 );
@@ -77,6 +78,11 @@ def _migrate(conn: sqlite3.Connection):
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(videos)")}
     if "position_seconds" not in cols:
         conn.execute("ALTER TABLE videos ADD COLUMN position_seconds REAL DEFAULT 0")
+        conn.commit()
+    if "watched_at" not in cols:
+        # Rows already watched keep 0: they were never due for deletion
+        # (an instant delete already took the ones that were).
+        conn.execute("ALTER TABLE videos ADD COLUMN watched_at INTEGER DEFAULT 0")
         conn.commit()
 
 

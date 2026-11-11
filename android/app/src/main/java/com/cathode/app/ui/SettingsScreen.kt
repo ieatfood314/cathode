@@ -369,8 +369,9 @@ enum class AfterWatching(val label: String) {
 /**
  * One choice for what happens to a watched video. It used to be two
  * switches on two cards (phone, server), and it wasn't obvious that the
- * phone one is what frees phone storage. The phone copy goes when the
- * player closes, never mid-play.
+ * phone one is what frees phone storage. Copies go a day after the video
+ * was marked watched (server's watched_grace_hours), never mid-play, so an
+ * accidental finish can be undone by unmarking it.
  */
 @Composable
 private fun AfterWatchingRow(phone: Boolean, server: Boolean?, onPick: (AfterWatching) -> Unit) {

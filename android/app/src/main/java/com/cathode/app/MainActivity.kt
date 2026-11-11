@@ -31,7 +31,6 @@ import com.cathode.app.data.AppPrefs
 import com.cathode.app.data.Library
 import com.cathode.app.data.OfflineRepo
 import com.cathode.app.data.PrefsRepo
-import com.cathode.app.data.SaveState
 import com.cathode.app.data.ServerSettings
 import com.cathode.app.data.StoreLocation
 import com.cathode.app.data.Video
@@ -177,21 +176,12 @@ class MainActivity : ComponentActivity() {
                 }
 
                 // Leaving a video (closed, or another one opened): record where
-                // it stopped, then free its phone copy if it's watched and
-                // that's wanted. Deferred to here so a copy never vanishes
-                // while it's playing.
+                // it stopped. Watched phone copies are freed by the sync, a
+                // day after they were marked (SyncWorker.afterSync), so an
+                // accidental finish can still be undone.
                 fun leave(v: Video, posSeconds: Int?) {
-                    val deleteWatched = prefs.deleteAfterWatched
-                    val loc = store
-                    Library.scope.launch {
-                        if (posSeconds != null) Library.reportProgress(appContext, v.id, posSeconds)
-                        if (deleteWatched && Library.find(v.id)?.watched == 1 &&
-                            OfflineRepo.stateOf(v.id) is SaveState.Saved
-                        ) {
-                            OfflineRepo.remove(appContext, loc, v.id)
-                            rescanPhone(loc)
-                        }
-                    }
+                    if (posSeconds == null) return
+                    Library.scope.launch { Library.reportProgress(appContext, v.id, posSeconds) }
                 }
 
                 fun livePositionOf(v: Video?): Int? {
@@ -201,17 +191,7 @@ class MainActivity : ComponentActivity() {
                 }
 
                 fun setWatched(v: Video, watched: Boolean) {
-                    val deleteWatched = prefs.deleteAfterWatched
-                    val isOpen = open?.id == v.id
-                    val loc = store
-                    Library.scope.launch {
-                        Library.markWatched(appContext, v.id, watched)
-                        // The open video's copy goes when the player closes.
-                        if (watched && deleteWatched && !isOpen) {
-                            OfflineRepo.remove(appContext, loc, v.id)
-                            rescanPhone(loc)
-                        }
-                    }
+                    Library.scope.launch { Library.markWatched(appContext, v.id, watched) }
                 }
 
                 // Nav taps keep `open` (and playback) alive: audio continues
