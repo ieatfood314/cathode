@@ -691,6 +691,7 @@ async function subOp(fn) {
 const RES = [360, 480, 720, 1080, 1440, 2160];
 const KEEP = [0, ...Array.from({length: 30}, (_, i) => i + 1), 60, 90, 180, 360];
 const BACKFILL = [[0, 'Off'], [5, '5 days'], [7, '7 days'], [30, '30 days'], [90, '90 days']];
+const SPEED = [[0, 'No limit'], [5, '5 Mbps'], [10, '10 Mbps'], [25, '25 Mbps'], [50, '50 Mbps'], [100, '100 Mbps']];
 const SB = [['sponsor', 'Sponsors'], ['intro', 'Intros'], ['outro', 'End cards'], ['selfpromo', 'Self-promo'],
   ['preview', 'Recaps'], ['interaction', 'Reminders'], ['filler', 'Filler'], ['music_offtopic', 'Off-topic music'],
   ['poi_highlight', 'Highlights']];
@@ -750,6 +751,8 @@ function setupPage() {
     '<input type="range" id="keep" min="0" max="' + (KEEP.length - 1) + '" step="1" value="' + ki + '"></div>' +
     '<div class="field"><div class="lbl"><span>Backfill</span></div><div class="sub">Also fetch older uploads from each channel</div>' +
     '<div class="chipgrid">' + BACKFILL.map(([d, l]) => '<button data-bf="' + d + '" class="' + (s.backfill_days === d ? 'on' : '') + '">' + l + '</button>').join('') + '</div></div>' +
+    '<div class="field"><div class="lbl"><span>Download speed</span></div><div class="sub">Limit on pulls from YouTube</div>' +
+    '<div class="chipgrid">' + SPEED.map(([m, l]) => '<button data-speed="' + m + '" class="' + ((s.download_limit_mbps || 0) === m ? 'on' : '') + '">' + l + '</button>').join('') + '</div></div>' +
     '<div class="field"><div class="toggle-row" id="daw"><div class="txt"><div class="lbl"><span>Delete from server after watching</span></div>' +
     '<div class="sub">A day after you finish. Phones have their own setting</div></div><span class="toggle' + (s.delete_after_watched ? ' on' : '') + '">' +
     (s.delete_after_watched ? 'ON' : 'OFF') + '</span></div></div></div>';
@@ -785,6 +788,7 @@ function bindSetup() {
   $('#keep').oninput = e => { $('#keepLbl').textContent = keepLabel(KEEP[+e.target.value]); };
   $('#keep').onchange = e => change({keep_days: KEEP[+e.target.value]}, false);
   for (const b of $$('[data-bf]')) b.onclick = () => change({backfill_days: +b.dataset.bf});
+  for (const b of $$('[data-speed]')) b.onclick = () => change({download_limit_mbps: +b.dataset.speed});
   $('#daw').onclick = () => change({delete_after_watched: !s.delete_after_watched});
   for (const b of $$('[data-rm-cat]')) b.onclick = () => {
     // Same rules as the app: cutting a category also drops it from an explicit mark list.

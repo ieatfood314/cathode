@@ -45,6 +45,9 @@ class Settings(BaseSettings):
     # skips to the end can still be undone by unmarking it.
     watched_grace_hours: int = 24
     max_videos_per_channel_scan: int = 10
+    # Cap on yt-dlp's download speed from YouTube, in megabits per second.
+    # 0 = unlimited.
+    download_limit_mbps: float = 0
 
     # HTTP server
     host: str = "0.0.0.0"

@@ -144,7 +144,7 @@ def kv_set(conn: sqlite3.Connection, k: str, v: str) -> None:
 PERSISTED_SETTINGS = [
     "poll_mode", "poll_interval_minutes", "max_resolution",
     "sponsorblock_remove", "sponsorblock_mark", "keep_days",
-    "backfill_days", "delete_after_watched",
+    "backfill_days", "delete_after_watched", "download_limit_mbps",
 ]
 
 

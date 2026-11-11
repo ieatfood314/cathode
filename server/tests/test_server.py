@@ -917,6 +917,36 @@ def test_web_ui_and_assets(tmp_path, monkeypatch):
     assert c.get("/assets/..%2Fmain.py").status_code == 404
 
 
+def test_download_speed_limit(monkeypatch):
+    from app.config import settings
+    from app.downloader import build_download_cmd, download_timeout
+    url, out, arch = "https://www.youtube.com/watch?v=x", "/tmp/o", Path("/tmp/a")
+    monkeypatch.setattr(settings, "download_limit_mbps", 0)
+    cmd = build_download_cmd(url, out, arch)
+    assert "--limit-rate" not in cmd and "--concurrent-fragments" in cmd
+    assert download_timeout() == 3600
+    monkeypatch.setattr(settings, "download_limit_mbps", 10)
+    cmd = build_download_cmd(url, out, arch)
+    # 10 Mbit/s = 1.25 MB/s; one fragment thread so the cap is the real total.
+    assert cmd[cmd.index("--limit-rate") + 1] == "1250000"
+    assert "--concurrent-fragments" not in cmd
+    assert download_timeout() == 6400
+
+
+def test_download_speed_setting_roundtrip(monkeypatch):
+    from fastapi.testclient import TestClient
+    from app.config import settings
+    from app.main import app
+    monkeypatch.setattr(settings, "download_limit_mbps", 0)
+    c = TestClient(app)
+    r = c.put("/api/settings", json={"download_limit_mbps": 10})
+    assert r.json()["settings"]["download_limit_mbps"] == 10
+    # A client that doesn't know the field (older phone app) leaves it alone.
+    c.put("/api/settings", json={"keep_days": settings.keep_days})
+    assert c.get("/api/settings").json()["download_limit_mbps"] == 10
+    assert c.put("/api/settings", json={"download_limit_mbps": -5}).json()["settings"]["download_limit_mbps"] == 0
+
+
 def test_duration_is_the_files_own(tmp_path, monkeypatch):
     """SponsorBlock cuts make the file shorter than YouTube's figure; the
     library shows the file's length."""

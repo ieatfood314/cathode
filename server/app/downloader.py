@@ -36,8 +36,6 @@ BASE_FLAGS = [
     "--file-access-retries", "10",
     "--retry-sleep", "fragment:exp=1:10",
     "--socket-timeout", "30",
-    "-N", "4",
-    "--concurrent-fragments", "4",
     "--embed-metadata",
     "--embed-chapters",
     "--convert-thumbnails", "jpg",
@@ -46,6 +44,29 @@ BASE_FLAGS = [
     "--merge-output-format", "mp4",
     "--match-filter", "live_status!=?is_live & live_status!=?is_upcoming & live_status!=?post_live",
 ]
+
+# Parallel fragments speed up unthrottled downloads. yt-dlp applies
+# --limit-rate to each fragment thread on its own, so a throttled download
+# uses one thread to make the cap the real total.
+PARALLEL_FLAGS = ["--concurrent-fragments", "4"]
+
+
+def rate_limit_bytes() -> int:
+    """The configured speed cap in bytes per second (0 = unlimited)."""
+    mbps = settings.download_limit_mbps or 0
+    return int(mbps * 125_000) if mbps > 0 else 0
+
+
+def download_timeout() -> int:
+    """Seconds one yt-dlp run may take before it is killed.
+
+    An hour is plenty unthrottled. A slow cap needs longer or a big video
+    (a 3-hour WAN Show is about 2 GB at 1080p) never finishes. Enough for
+    8 GB at the cap, never less than an hour.
+    """
+    rate = rate_limit_bytes()
+    return max(3600, int(8e9 / rate)) if rate else 3600
+
 
 # yt-dlp prints this (and exits 0, writing nothing) when --match-filter rejects.
 NOT_READY = "does not pass filter"
@@ -91,6 +112,8 @@ def build_download_cmd(video_url: str, out_tmpl: str, archive: Path,
         *BASE_FLAGS,
         "--sponsorblock-api", settings.sponsorblock_api,
     ]
+    rate = rate_limit_bytes()
+    cmd += ["--limit-rate", str(rate)] if rate else PARALLEL_FLAGS
     # Empty mark/remove lists mean "do nothing" — omit the flags entirely
     # (passing an empty string would fail the download).
     if settings.sponsorblock_mark:
@@ -162,7 +185,7 @@ def download_video(video_id: str, media_dir: Path, archive: Path,
     url = f"https://www.youtube.com/watch?v={video_id}"
     cmd = build_download_cmd(url, out_tmpl, archive, dateafter=dateafter)
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=download_timeout())
         if log:
             tail = (proc.stderr or proc.stdout or "")[-2000:]
             log(f"yt-dlp {video_id} rc={proc.returncode} {tail}")
@@ -170,7 +193,7 @@ def download_video(video_id: str, media_dir: Path, archive: Path,
             return False, NOT_READY_ERROR
         return proc.returncode == 0, (proc.stderr or "")[-2000:]
     except subprocess.TimeoutExpired:
-        return False, "timeout after 1h"
+        return False, f"timeout after {download_timeout() // 60} min"
     except Exception as e:  # yt-dlp missing etc.
         return False, str(e)
 

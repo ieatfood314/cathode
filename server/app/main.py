@@ -200,6 +200,7 @@ class SettingsIn(BaseModel):
     keep_days: int | None = None
     backfill_days: int | None = None
     delete_after_watched: bool | None = None
+    download_limit_mbps: float | None = None  # 0 = unlimited
 
 
 SB_KNOWN = {"all", "sponsor", "intro", "outro", "selfpromo", "preview",
@@ -228,6 +229,7 @@ def get_settings():
         "backfill_days": settings.backfill_days,
         "delete_after_watched": settings.delete_after_watched,
         "watched_grace_hours": settings.watched_grace_hours,
+        "download_limit_mbps": settings.download_limit_mbps,
     }
 
 
@@ -257,6 +259,8 @@ def put_settings(body: SettingsIn):
         conn.close()
     if body.delete_after_watched is not None:
         settings.delete_after_watched = bool(body.delete_after_watched)
+    if body.download_limit_mbps is not None:
+        settings.download_limit_mbps = max(0.0, min(10000.0, body.download_limit_mbps))
     dbmod.save_settings_snapshot(settings)
     return {"ok": True, "settings": get_settings()}
 
