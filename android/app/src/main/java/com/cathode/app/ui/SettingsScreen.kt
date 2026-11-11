@@ -225,7 +225,10 @@ fun SettingsScreen(
             if (serverStatus != null) Osd(serverStatus.uppercase(), Modifier.padding(bottom = 10.dp), size = 17.sp, glow = false)
         }
         when {
-            server != null -> ServerPanels(server, onServer)
+            server != null -> {
+                ServerPanels(server, onServer)
+                YouTubeAccountPanel(prefs.serverUrl)
+            }
             serverLoading -> CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
             else -> Hint("Connect to a server to change these.")
         }

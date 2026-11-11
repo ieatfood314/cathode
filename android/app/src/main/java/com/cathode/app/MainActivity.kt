@@ -376,6 +376,8 @@ class MainActivity : ComponentActivity() {
                                     .filter { it.channelTitle != playing.channelTitle }.take(6),
                                 thumbUrl = { v -> "${prefs.serverUrl}/api/thumbs/${v.id}" },
                                 onOpen = { v -> openVideo(v) },
+                                serverUrl = prefs.serverUrl,
+                                canUseNetwork = canUseNetwork,
                             )
                             tab == 0 -> LibraryScreen(
                                 videos = videos,

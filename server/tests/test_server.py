@@ -974,3 +974,136 @@ def test_duration_is_the_files_own(tmp_path, monkeypatch):
     p._enrich_from_info(conn, "abc123XYZ_-", info, main)
     assert dur() == 960
     conn.close()
+
+
+def _comments_env(tmp_path, monkeypatch):
+    from app import comments
+    from app.config import settings
+    monkeypatch.setattr(settings, "data_dir", str(tmp_path))
+    monkeypatch.setattr(settings, "db_path", str(tmp_path / "cathode.db"))
+    return comments
+
+
+RAW_COMMENTS = [
+    {"id": "Ugtop", "parent": "root", "text": "first", "like_count": 12, "author": "@a",
+     "_time_text": "1 day ago", "is_pinned": True, "author_is_uploader": True},
+    {"id": "Ugtop.r1", "parent": "Ugtop", "text": "reply", "author": "@b", "like_count": None},
+    {"id": "Ugtwo", "parent": "root", "text": "second", "author": "@c"},
+]
+
+
+def test_comments_are_fetched_once_then_cached(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+    from app.main import app
+    comments = _comments_env(tmp_path, monkeypatch)
+    calls = []
+
+    def fake_fetch(video_id):
+        calls.append(video_id)
+        return [comments.slim(c) for c in RAW_COMMENTS]
+    monkeypatch.setattr(comments, "fetch", fake_fetch)
+    c = TestClient(app)
+    r = c.get("/api/videos/abcdefghijk/comments").json()
+    assert [x["id"] for x in r["comments"]] == ["Ugtop", "Ugtop.r1", "Ugtwo"]
+    top, reply = r["comments"][0], r["comments"][1]
+    assert top["parent"] == "" and top["likes"] == 12 and top["pinned"] and top["uploader"]
+    assert reply["parent"] == "Ugtop" and reply["likes"] == 0
+    assert r["account"] == {"signed_in": False, "name": ""}
+    c.get("/api/videos/abcdefghijk/comments")
+    assert calls == ["abcdefghijk"]
+    c.get("/api/videos/abcdefghijk/comments", params={"refresh": True})
+    assert len(calls) == 2
+    # Not a YouTube id: never reaches yt-dlp.
+    assert c.get("/api/videos/--exec=rm/comments").status_code == 404
+    assert len(calls) == 2
+
+
+def test_comments_fall_back_to_the_cache_when_youtube_fails(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+    from app.main import app
+    comments = _comments_env(tmp_path, monkeypatch)
+    c = TestClient(app)
+
+    def broken(video_id):
+        raise comments.CommentError("YouTube took too long")
+    monkeypatch.setattr(comments, "fetch", broken)
+    r = c.get("/api/videos/abcdefghijk/comments")
+    assert r.status_code == 502 and r.json()["detail"] == "YouTube took too long"
+    monkeypatch.setattr(comments, "fetch", lambda v: [comments.slim(RAW_COMMENTS[0])])
+    c.get("/api/videos/abcdefghijk/comments")
+    monkeypatch.setattr(comments, "fetch", broken)
+    r = c.get("/api/videos/abcdefghijk/comments", params={"refresh": True})
+    assert r.status_code == 200 and len(r.json()["comments"]) == 1
+
+
+def test_cookie_parsing_and_post_params():
+    from app.comments import parse_cookies, post_params
+    netscape = ("# Netscape HTTP Cookie File\n"
+                ".youtube.com\tTRUE\t/\tTRUE\t1900000000\tSAPISID\tabc/def\n"
+                "#HttpOnly_.youtube.com\tTRUE\t/\tTRUE\t1900000000\t__Secure-3PSID\txyz\n"
+                ".example.com\tTRUE\t/\tTRUE\t1900000000\tOTHER\tnope\n")
+    assert parse_cookies(netscape) == {"SAPISID": "abc/def", "__Secure-3PSID": "xyz"}
+    assert parse_cookies("SAPISID=abc/def; LOGIN_INFO=a=b=") == {"SAPISID": "abc/def", "LOGIN_INFO": "a=b="}
+    # The value YouTube's own page sends for this video.
+    assert post_params("dQw4w9WgXcQ") == "EgtkUXc0dzlXZ1hjUSoCCABQBw%3D%3D"
+    assert post_params("dQw4w9WgXcQ", "Ugtop") != post_params("dQw4w9WgXcQ")
+
+
+def test_sign_in_post_and_sign_out(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+    from app.main import app
+    comments = _comments_env(tmp_path, monkeypatch)
+    monkeypatch.setattr(comments, "fetch", lambda v: [comments.slim(x) for x in RAW_COMMENTS])
+    sent = []
+    logged_in = {"responseContext": {"serviceTrackingParams": [
+        {"params": [{"key": "logged_in", "value": "1"}]}]},
+        "actions": [{"header": {"channelHandle": {"simpleText": "@me"}}}]}
+    replies = {"account/account_menu": logged_in}
+
+    def fake_innertube(endpoint, body, cookies):
+        sent.append((endpoint, body, cookies))
+        return replies[endpoint]
+    monkeypatch.setattr(comments, "_innertube", fake_innertube)
+    c = TestClient(app)
+
+    # Nothing saved yet: posting is refused before YouTube is asked.
+    assert c.post("/api/videos/abcdefghijk/comments", json={"text": "hi"}).status_code == 401
+    assert c.post("/api/youtube/account", json={"cookies": "PREF=1"}).status_code == 400
+    assert sent == []
+    r = c.post("/api/youtube/account", json={"cookies": "SAPISID=s3cret; __Secure-3PSID=x"})
+    assert r.json() == {"signed_in": True, "name": "@me"}
+    # The cookies stay on the server: readable by its user only, in no reply.
+    saved = tmp_path / "youtube_account.json"
+    assert saved.stat().st_mode & 0o077 == 0
+    assert "s3cret" not in c.get("/api/youtube/account").text
+    assert "s3cret" not in c.get("/api/videos/abcdefghijk/comments").text
+
+    replies["comment/create_comment"] = {"actionResult": {"status": "STATUS_SUCCEEDED"},
+                                         "actions": [{"createCommentAction": {"commentId": "Ugnew"}}]}
+    r = c.post("/api/videos/abcdefghijk/comments", json={"text": "  hello  "})
+    assert r.json()["comment"]["id"] == "Ugnew" and r.json()["comment"]["mine"] is True
+    endpoint, body, cookies = sent[-1]
+    assert endpoint == "comment/create_comment" and body["commentText"] == "hello"
+    assert cookies["SAPISID"] == "s3cret"
+    # Shown first right away, and kept through a refetch that doesn't have it yet.
+    for params in ({}, {"refresh": True}):
+        ids = [x["id"] for x in c.get("/api/videos/abcdefghijk/comments", params=params).json()["comments"]]
+        assert ids == ["Ugnew", "Ugtop", "Ugtop.r1", "Ugtwo"]
+
+    # A reply to a reply lands at the end of that thread.
+    replies["comment/create_comment_reply"] = {"actionResult": {"status": "STATUS_SUCCEEDED"}}
+    r = c.post("/api/videos/abcdefghijk/comments", json={"text": "re", "parent": "Ugtop.r1"})
+    assert r.json()["comment"]["parent"] == "Ugtop"
+    assert sent[-1][1]["createReplyParams"] == comments.post_params("abcdefghijk", "Ugtop")
+    ids = [x["id"] for x in c.get("/api/videos/abcdefghijk/comments").json()["comments"]]
+    assert ids[:3] == ["Ugnew", "Ugtop", "Ugtop.r1"] and ids[4] == "Ugtwo"
+
+    # YouTube refuses with HTTP 200 and an error action: that is not a post.
+    replies["comment/create_comment"] = {"actions": [{"showErrorAction": {"errorMessage": {
+        "messageRenderer": {"text": {"simpleText": "Comment failed to post."}}}}}]}
+    r = c.post("/api/videos/abcdefghijk/comments", json={"text": "nope"})
+    assert r.status_code == 502 and r.json()["detail"] == "Comment failed to post"
+    assert c.post("/api/videos/abcdefghijk/comments", json={"text": "   "}).status_code == 400
+
+    assert c.delete("/api/youtube/account").json()["signed_in"] is False
+    assert not saved.exists()

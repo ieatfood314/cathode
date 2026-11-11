@@ -12,6 +12,7 @@ from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 
+from . import comments as commentsmod
 from . import db as dbmod
 from .config import settings
 from .poller import poller
@@ -423,6 +424,58 @@ def mark_watched(video_id: str, watched: bool = True):
     conn.close()
     # Kept for older apps that read it; the file is never deleted right away now.
     return {"ok": True, "deleted_server_file": False}
+
+
+class CommentIn(BaseModel):
+    text: str
+    parent: str | None = None  # a comment id: post as a reply in its thread
+
+
+class YouTubeAccountIn(BaseModel):
+    cookies: str  # a cookies.txt export, or a "name=value; ..." Cookie header
+
+
+@app.get("/api/videos/{video_id}/comments")
+def video_comments(video_id: str, refresh: bool = False):
+    """The video's top YouTube comments (replies carry their thread's id in
+    `parent`). Cached for 15 minutes; `refresh` fetches again now."""
+    try:
+        items, fetched_at = commentsmod.get(video_id, refresh=refresh)
+    except commentsmod.CommentError as e:
+        raise HTTPException(e.status, str(e))
+    return {"comments": items, "fetched_at": fetched_at, "account": commentsmod.account()}
+
+
+@app.post("/api/videos/{video_id}/comments")
+def post_comment(video_id: str, body: CommentIn):
+    """Post to YouTube as the signed-in account."""
+    try:
+        comment = commentsmod.post(video_id, body.text, body.parent or "")
+    except commentsmod.CommentError as e:
+        raise HTTPException(e.status, str(e))
+    return {"ok": True, "comment": comment}
+
+
+@app.get("/api/youtube/account")
+def youtube_account():
+    return commentsmod.account()
+
+
+@app.post("/api/youtube/account")
+def youtube_sign_in(body: YouTubeAccountIn):
+    """Keep a YouTube session for posting comments. The cookies are checked
+    against YouTube first and are never returned by any endpoint."""
+    if len(body.cookies) > 200_000:
+        raise HTTPException(400, "file too big")
+    try:
+        return commentsmod.sign_in(body.cookies)
+    except commentsmod.CommentError as e:
+        raise HTTPException(e.status, str(e))
+
+
+@app.delete("/api/youtube/account")
+def youtube_sign_out():
+    return commentsmod.sign_out()
 
 
 def _resolve_media(rel: str) -> Path:

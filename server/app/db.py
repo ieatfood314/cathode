@@ -46,6 +46,12 @@ CREATE TABLE IF NOT EXISTS watch_sessions (
   seconds REAL DEFAULT 0,
   updated INTEGER DEFAULT 0
 );
+-- YouTube comments per video, as last fetched (a JSON list).
+CREATE TABLE IF NOT EXISTS comments (
+  video_id TEXT PRIMARY KEY,
+  fetched_at INTEGER DEFAULT 0,
+  body TEXT DEFAULT '[]'
+);
 CREATE INDEX IF NOT EXISTS idx_videos_published ON videos(published DESC);
 CREATE INDEX IF NOT EXISTS idx_watch_sessions_day ON watch_sessions(day);
 """

@@ -14,6 +14,7 @@ const S = {
   videos: [], loaded: false, loading: false, error: null,
   filter: 'all', current: null, settings: null, stats: null, health: null,
   subs: null, subMsg: '', showHelp: false, statDay: null,
+  watchTab: 'next', cm: null, account: null, accountMsg: '', showCookieHelp: false,
 };
 
 async function api(path, opts) {
@@ -546,15 +547,127 @@ function renderWatch(id) {
     (fmtAgo(v) ? '<span class="chip">' + esc(fmtAgo(v)) + '</span>' : '') +
     (v.watched ? '<span class="rev">SEEN</span>' : '') + '</div>' +
     '<div class="acts"><button class="btn" data-act="seen">' + (v.watched ? 'Mark unwatched' : 'Mark watched') + '</button></div>' +
-    (later.length ? '<div class="section lit">Later on CH ' + chLabel(v.channel_title) + '</div>' + later.map(x => nextRow(x, false)).join('') : '') +
-    (also.length ? '<div class="section lit">Also on air</div>' + also.map(x => nextRow(x, true)).join('') : '') +
-    '</aside></div>';
+    '<div class="tabs"><button data-tab="next">Up next</button><button data-tab="comments">Comments</button></div>' +
+    '<div id="tabBody"></div></aside></div>';
+  const upNext = (later.length ? '<div class="section lit">Later on CH ' + chLabel(v.channel_title) + '</div>' + later.map(x => nextRow(x, false)).join('') : '') +
+    (also.length ? '<div class="section lit">Also on air</div>' + also.map(x => nextRow(x, true)).join('') : '');
+  const drawTab = () => {
+    for (const b of $$('.tabs button', view)) b.classList.toggle('on', b.dataset.tab === S.watchTab);
+    const body = $('#tabBody');
+    if (S.watchTab === 'comments') { drawComments(v); return; }
+    body.innerHTML = upNext;
+    for (const el of $$('.next', body)) el.onclick = () => { const x = find(el.dataset.id); if (x) watch(x); };
+  };
+  for (const b of $$('.tabs button', view)) b.onclick = () => { S.watchTab = b.dataset.tab; drawTab(); };
   $('#slot').appendChild(set);
   set.className = 'full'; set.hidden = false; vid.controls = true;
   start(v);
   $('[data-act=close]', view).onclick = closeVideo;
   $('[data-act=seen]', view).onclick = () => setWatched(v, !v.watched);
-  for (const el of $$('.next', view)) el.onclick = () => { const x = find(el.dataset.id); if (x) watch(x); };
+  drawTab();
+  // Fetched as the video starts, so the list is there when you look.
+  loadComments(v);
+}
+
+// ------------------------------------------------------------ comments (YouTube's, via the server)
+
+async function loadComments(v, refresh) {
+  if (!S.cm || S.cm.id !== v.id) S.cm = {id: v.id, list: null, error: null, open: new Set(), reply: null, draft: '', msg: ''};
+  else if (S.cm.loading || (S.cm.list && !refresh)) return;
+  const cm = S.cm;
+  cm.loading = true; cm.error = null;
+  redrawComments();
+  try {
+    const r = await api('/api/videos/' + encodeURIComponent(v.id) + '/comments' + (refresh ? '?refresh=true' : ''));
+    cm.list = r.comments || []; S.account = r.account || S.account;
+  } catch (e) { cm.error = e.message; }
+  cm.loading = false;
+  redrawComments();
+}
+function redrawComments() {
+  const r = route();
+  if (r.page === 'watch' && S.watchTab === 'comments' && S.cm && S.cm.id === r.arg && $('#tabBody')) drawComments(find(r.arg));
+}
+function commentHtml(c, replies) {
+  const cm = S.cm;
+  let html = '<div class="cmt' + (c.parent ? ' reply' : '') + '"><div class="cm-hd">' +
+    '<span class="' + (c.uploader ? 'rev' : 'dim') + '">' + esc(c.author || '?') + '</span>' +
+    '<span class="faint">' + esc(c.time_text) + '</span>' + (c.pinned ? '<span class="chip">Pinned</span>' : '') + '</div>' +
+    '<div class="cm-tx" data-more>' + esc(c.text) + '</div><div class="cm-ft">' +
+    (c.likes ? '<span class="dim">+' + c.likes + '</span>' : '') +
+    (S.account && S.account.signed_in ? '<button class="dim" data-reply="' + esc(c.id) + '">Reply</button>' : '') +
+    (replies && replies.length ? '<button class="lit" data-thread="' + esc(c.id) + '">' + (cm.open.has(c.id) ? 'Hide' : replies.length) +
+      (replies.length === 1 ? ' reply' : ' replies') + '</button>' : '') + '</div>';
+  if (replies && cm.open.has(c.id)) html += replies.map(x => commentHtml(x)).join('');
+  return html + '</div>';
+}
+function drawComments(v) {
+  const body = $('#tabBody'), cm = S.cm;
+  if (!body || !v || !cm) return;
+  const signedIn = S.account && S.account.signed_in;
+  const target = cm.reply && (cm.list || []).find(c => c.id === cm.reply);
+  let html = '<div class="cm">';
+  if (signedIn) {
+    html += '<form id="cmForm">' + (target ? '<div class="cm-to dim">Reply to ' + esc(target.author) + '<button type="button" class="lit" id="cmCancel" aria-label="Cancel reply">✕</button></div>' : '') +
+      '<div class="prompt"><b>&gt;</b><textarea id="cmText" rows="1" maxlength="10000" placeholder="' + (target ? 'Add a reply' : 'Add a comment') + '"></textarea>' +
+      '<button class="btn" id="cmSend" disabled>Send</button></div></form>';
+  } else if (S.account) {
+    html += '<a class="menu-line cm-signin" href="#/setup"><span class="dim">&gt;</span><span class="lit">Sign in to comment</span></a>';
+  }
+  html += '<div class="cm-msg notice" id="cmMsg">' + esc(cm.msg) + '</div>';
+  if (cm.error && !cm.list) html += '<p class="notice">! ' + esc(cm.error) + '</p><button class="btn" id="cmRetry">Retry</button>';
+  else if (!cm.list) html += '<p class="hint">TUNING…<span class="cursor"></span></p>';
+  else if (!cm.list.length) html += '<p class="hint">No comments yet.</p>';
+  else {
+    const tops = cm.list.filter(c => !c.parent);
+    html += tops.map(c => commentHtml(c, cm.list.filter(x => x.parent === c.id))).join('') +
+      '<button class="btn cm-again" id="cmRetry"' + (cm.loading ? ' disabled' : '') + '>' + (cm.loading ? 'Loading' : 'Reload') + '</button>';
+  }
+  body.innerHTML = html + '</div>';
+  const text = $('#cmText'), send = $('#cmSend');
+  if (text) {
+    text.value = cm.draft;
+    const fit = () => {
+      text.style.height = 'auto'; text.style.height = Math.min(text.scrollHeight, 180) + 'px';
+      send.disabled = !text.value.trim() || cm.sending; send.classList.toggle('on', !send.disabled);
+    };
+    text.oninput = () => { cm.draft = text.value; fit(); };
+    text.onkeydown = e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); $('#cmForm').requestSubmit(); } };
+    fit();
+    $('#cmForm').onsubmit = async e => {
+      e.preventDefault();
+      const t = text.value.trim();
+      if (!t || cm.sending) return;
+      cm.sending = true; cm.msg = 'Sending'; drawComments(v);
+      try {
+        const r = await api('/api/videos/' + encodeURIComponent(v.id) + '/comments', {method: 'POST',
+          headers: {'Content-Type': 'application/json'}, body: JSON.stringify({text: t, parent: cm.reply})});
+        const c = r.comment;
+        cm.list = cm.list || [];
+        if (c.parent) {
+          let at = cm.list.length;
+          cm.list.forEach((x, i) => { if (x.id === c.parent || x.parent === c.parent) at = i + 1; });
+          cm.list.splice(at, 0, c); cm.open.add(c.parent);
+        } else cm.list.unshift(c);
+        cm.draft = ''; cm.reply = null; cm.msg = 'Posted';
+      } catch (err) { cm.msg = '! ' + err.message; }
+      cm.sending = false;
+      if (S.cm === cm) redrawComments();
+    };
+  }
+  const cancel = $('#cmCancel'); if (cancel) cancel.onclick = () => { cm.reply = null; drawComments(v); };
+  const retry = $('#cmRetry'); if (retry) retry.onclick = () => loadComments(v, true);
+  for (const b of $$('[data-thread]', body)) b.onclick = () => {
+    cm.open.has(b.dataset.thread) ? cm.open.delete(b.dataset.thread) : cm.open.add(b.dataset.thread); drawComments(v);
+  };
+  for (const b of $$('[data-reply]', body)) b.onclick = () => {
+    cm.reply = b.dataset.reply; cm.msg = ''; drawComments(v);
+    const t = $('#cmText'); if (t) { t.focus(); t.scrollIntoView({block: 'nearest'}); }
+  };
+  // Long comments are cut short until clicked.
+  for (const el of $$('[data-more]', body)) {
+    if (el.scrollHeight > el.clientHeight + 2) { el.classList.add('cut'); el.onclick = () => el.classList.toggle('all'); }
+  }
 }
 
 // Progress: every 10 s while playing, on pause, and on leaving.
@@ -762,11 +875,45 @@ function setupPage() {
     '<div class="field"><div class="lbl"><span>Remove</span></div><div class="chipgrid">' +
     SB.filter(([k]) => k !== 'poi_highlight').map(([k, l]) => '<button data-rm-cat="' + k + '" class="' + (rm.has(k) ? 'on' : '') + '">' + l + '</button>').join('') + '</div></div>' +
     '<div class="field"><div class="lbl"><span>Mark as chapters</span></div><div class="chipgrid">' +
-    SB.map(([k, l]) => '<button data-mk-cat="' + k + '" class="' + (mk.has(k) ? 'on' : '') + '">' + l + '</button>').join('') + '</div></div></div></div>';
+    SB.map(([k, l]) => '<button data-mk-cat="' + k + '" class="' + (mk.has(k) ? 'on' : '') + '">' + l + '</button>').join('') + '</div></div></div>';
+  const a = S.account;
+  html += '<div class="section lit">YouTube account<span id="accMsg" class="dim" style="font-size:20px;order:3">' + esc(S.accountMsg) + '</span></div><div class="panel">' +
+    '<div class="scanline"><div class="hint" style="flex:1">' + (!a ? 'TUNING…' : a.signed_in ? 'Signed in' + (a.name ? ' as <span class="lit">' + esc(a.name) + '</span>' : '') : 'For posting comments') + '</div>' +
+    (a && a.signed_in ? '<button class="btn" id="accOut">Sign out</button>' :
+      '<button class="btn" id="accIn">Sign in</button><button class="btn" id="accHelp" aria-label="How to sign in">i</button>') +
+    '<input type="file" id="accFile" accept=".txt,text/plain" hidden></div>' +
+    (S.showCookieHelp && !(a && a.signed_in) ? '<div class="help">The phone app has a normal sign-in page. In a browser, use a cookies file:<ol>' +
+      '<li>Open a private window and sign in to youtube.com.</li><li>Export that site\'s cookies as cookies.txt with a browser extension.</li>' +
+      '<li>Close the private window, then pick the file with Sign in.</li></ol>The file stays on your server and is only used to post comments.</div>' : '') +
+    '</div></div>';
   return html;
+}
+async function loadAccount() {
+  try { S.account = await api('/api/youtube/account'); } catch (e) {}
+  rerender('settings');
+}
+function bindAccount() {
+  const done = msg => { S.accountMsg = msg; render(); };
+  const file = $('#accFile');
+  if ($('#accIn')) $('#accIn').onclick = () => file.click();
+  if ($('#accHelp')) $('#accHelp').onclick = () => { S.showCookieHelp = !S.showCookieHelp; render(); };
+  if (file) file.onchange = async () => {
+    const f = file.files[0];
+    if (!f) return;
+    $('#accMsg').textContent = 'CHECKING';
+    try {
+      S.account = await api('/api/youtube/account', {method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({cookies: await f.text()})});
+      S.showCookieHelp = false; done('SIGNED IN');
+    } catch (e) { done('! ' + e.message); }
+  };
+  if ($('#accOut')) $('#accOut').onclick = async () => {
+    try { S.account = await api('/api/youtube/account', {method: 'DELETE'}); done('SIGNED OUT'); } catch (e) { done('! ' + e.message); }
+  };
 }
 function bindSetup() {
   const s = S.settings;
+  if (s) bindAccount();
   $('#scanNow').onclick = async () => {
     const b = $('#scanNow'); b.disabled = true; b.textContent = 'SCANNING';
     try {
@@ -875,6 +1022,6 @@ document.addEventListener('keydown', e => {
 // ------------------------------------------------------------ boot
 
 status(); clock(); render();
-loadLibrary(); loadStats(); loadSettings(); loadHealth();
+loadLibrary(); loadStats(); loadSettings(); loadHealth(); loadAccount();
 setInterval(() => { if (!document.hidden) loadLibrary(); }, 5 * 60 * 1000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) { loadLibrary(); loadStats(); } });

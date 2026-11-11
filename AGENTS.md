@@ -8,6 +8,7 @@ The README's "How it works" and "API" sections give the big picture. This file c
   - `poller.py`: finds new uploads and downloads them right away.
   - `downloader.py`: yt-dlp and SponsorBlock.
   - `subscriptions.py`: reads OPML, CSV and txt subscription lists.
+  - `comments.py`: YouTube comments. Reads with yt-dlp, posts through YouTube's web API with a signed-in session.
   - `db.py`: the SQLite schema and migrations.
   - `config.py`: the `CATHODE_*` environment settings.
 - **`server/app/static/`** is the web UI. `cathode.js` (about 46 KB) is divided by `// ----- name` banners. Grep for the section you need instead of reading the whole file.
@@ -26,4 +27,5 @@ The README's "How it works" and "API" sections give the big picture. This file c
 - **The live server's database can be lost.** The server is the `cathode` Docker container, built from this checkout with `docker compose up -d --build`, and its database holds watch history.
   - Back up `cathode.db` before a migration that could lose data.
   - Check `/api/health` after a rebuild.
+- **Posting comments has never been run against a real account by an agent.** Reading is tested live. Posting was checked only as far as YouTube accepting the request shape while signed out, plus mocked tests. YouTube answers a refused post with HTTP 200 and a `showErrorAction`, so `comments.post` counts only an explicit success. Don't post test comments from Aidan's account.
 - **The UI copy is deliberately short.** Labels are short, explanations sit behind an (i) button, and the look is flat with one accent color. Match it.

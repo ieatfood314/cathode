@@ -63,6 +63,8 @@ Designed as a TV station made of your subscriptions, on a monochrome green-phosp
 
 **Stats** (Setup → Stats) shows how long you've actually spent watching: today, the last 7 days, a daily average, all time, a two-week chart and your top channels. Only time spent playing counts (not paused or buffering), and time watched offline is added once the phone is back on Wi-Fi. The web UI's player counts too.
 
+**Comments** sit in a tab beside *Up next* in the player, in the app and on the web. They are the video's top YouTube comments with their replies, fetched by the server when you open the video and kept for 15 minutes. To post or reply, sign in to YouTube once: in the app, Setup → **YouTube account** → Sign in opens Google's own sign-in page; on the web, Setup takes a `cookies.txt` export instead. Either way the session is stored on your server (`data/youtube_account.json`), is used only for posting comments, and is never sent back to a client. Downloads stay anonymous. Anyone who can reach the server can post as that account, which is one more reason to keep it off the public internet.
+
 **Install via [Obtainium](https://apps.obtainium.imranr.dev/)** (update tracking, no store needed): add app → source GitHub → `https://github.com/ieatfood314/cathode` — it picks up each release APK automatically. Or download the APK from the [releases page](../../releases) and install directly.
 
 ```bash
@@ -115,6 +117,9 @@ The mode and interval live in Settings → Server config; the server also expose
 | POST | `/api/videos/{id}/watched?watched=true` | watch state (`false` also rewinds to the start). With delete-after-watched on, files go `watched_grace_hours` (24) after it's marked, not right away |
 | POST | `/api/watchtime` | `{"sessions": [{id, video_id, day, seconds}]}` running totals per video per day; the larger total wins, so resending is safe |
 | GET | `/api/stats?since=YYYY-MM-DD` | watch time per day and channel since that date, plus the all-time total |
+| GET | `/api/videos/{id}/comments?refresh` | top YouTube comments (a reply has its thread's id in `parent`), cached 15 minutes |
+| POST | `/api/videos/{id}/comments` | `{"text": "...", "parent": "<comment id>"}` posts as the signed-in account; `parent` makes it a reply |
+| GET/POST/DELETE | `/api/youtube/account` | who comments post as; POST `{"cookies": "..."}` (cookies.txt or a Cookie header) signs in |
 | POST | `/api/subscriptions/upload` | `.opml` / `.csv` (replaces that file once it parses) or `.txt` (adds) |
 
 ## Privacy / self-host notes

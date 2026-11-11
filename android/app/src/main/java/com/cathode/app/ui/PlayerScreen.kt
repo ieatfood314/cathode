@@ -35,8 +35,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Icon
@@ -51,6 +51,8 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -71,6 +73,7 @@ import com.cathode.app.data.SaveState
 import com.cathode.app.data.Video
 import com.cathode.app.player.Playback
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 private const val RESUME_WINDOW = 0.95
 
@@ -94,6 +97,9 @@ fun PlayerScreen(
     alsoOnAir: List<Video> = emptyList(),
     thumbUrl: (Video) -> String = { "" },
     onOpen: (Video) -> Unit = {},
+    // For the comments tab.
+    serverUrl: String = "",
+    canUseNetwork: Boolean = false,
 ) {
     val context = LocalContext.current
     val activity = context as? Activity
@@ -270,6 +276,7 @@ fun PlayerScreen(
         if (showDetails) {
             ProgramCard(
                 video, lineup, saveState, savedUri != null, upNext, alsoOnAir, thumbUrl, onOpen,
+                serverUrl, canUseNetwork,
                 Modifier.fillMaxWidth().weight(1f),
             )
         }
@@ -314,36 +321,63 @@ private fun ProgramCard(
     alsoOnAir: List<Video>,
     thumbUrl: (Video) -> String,
     onOpen: (Video) -> Unit,
+    serverUrl: String,
+    canUseNetwork: Boolean,
     modifier: Modifier,
 ) {
-    Column(modifier.background(Tube).verticalScroll(rememberScrollState())) {
+    // Up next, or the video's YouTube comments. The choice carries over
+    // to the next video.
+    var showComments by rememberSaveable { mutableStateOf(false) }
+    val comments = rememberComments(serverUrl, video.id, canUseNetwork)
+    val scope = rememberCoroutineScope()
+    Column(modifier.background(Tube)) {
         Box(Modifier.fillMaxWidth().height(1.dp).background(P40))
-        Column(Modifier.padding(start = 20.dp, end = 20.dp, top = 16.dp)) {
-            Osd(
-                "CH ${lineup.label(video.channelTitle)}  ${video.channelTitle.orEmpty().uppercase()}",
-                color = P60, size = 22.sp, glow = false,
-            )
-            Osd(video.title.orEmpty(), size = 32.sp, maxLines = 4, overflow = TextOverflow.Ellipsis)
-            Gap(12)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (video.duration > 0) Chip(formatDuration(video.duration))
-                uploadedLabel(video)?.let { Chip(it.uppercase()) }
-                when {
-                    saveState is SaveState.Saving -> Reverse("● REC ${(saveState.fraction * 100).toInt()}%", size = 20.sp, blink = true)
-                    saveState is SaveState.Queued -> Chip("QUEUED")
-                    onPhone -> Reverse("ON PHONE", size = 20.sp)
+        LazyColumn(Modifier.fillMaxWidth().weight(1f)) {
+            item(key = "program") {
+                Column(Modifier.padding(start = 20.dp, end = 20.dp, top = 16.dp)) {
+                    Osd(
+                        "CH ${lineup.label(video.channelTitle)}  ${video.channelTitle.orEmpty().uppercase()}",
+                        color = P60, size = 22.sp, glow = false,
+                    )
+                    Osd(video.title.orEmpty(), size = 32.sp, maxLines = 4, overflow = TextOverflow.Ellipsis)
+                    Gap(12)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        if (video.duration > 0) Chip(formatDuration(video.duration))
+                        uploadedLabel(video)?.let { Chip(it.uppercase()) }
+                        when {
+                            saveState is SaveState.Saving -> Reverse("● REC ${(saveState.fraction * 100).toInt()}%", size = 20.sp, blink = true)
+                            saveState is SaveState.Queued -> Chip("QUEUED")
+                            onPhone -> Reverse("ON PHONE", size = 20.sp)
+                        }
+                    }
+                    Gap(18)
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        BlockTab("Up next", !showComments, size = 22.sp) { showComments = false }
+                        BlockTab("Comments", showComments, size = 22.sp) { showComments = true }
+                    }
+                    Gap(8)
+                    Box(Modifier.fillMaxWidth().height(1.dp).background(P20))
                 }
             }
+            if (showComments) {
+                commentItems(comments, canUseNetwork) { scope.launch { comments.load(refresh = true) } }
+            } else {
+                if (upNext.isNotEmpty()) {
+                    item(key = "later") {
+                        SectionLabel("Later on CH ${lineup.label(video.channelTitle)}", Modifier.padding(horizontal = 20.dp))
+                    }
+                    items(upNext, key = { "later-${it.id}" }) { v -> UpNextRow(v, thumbUrl(v), null) { onOpen(v) } }
+                }
+                if (alsoOnAir.isNotEmpty()) {
+                    item(key = "also") { SectionLabel("Also on air", Modifier.padding(horizontal = 20.dp)) }
+                    items(alsoOnAir, key = { "also-${it.id}" }) { v ->
+                        UpNextRow(v, thumbUrl(v), lineup.label(v.channelTitle)) { onOpen(v) }
+                    }
+                }
+            }
+            item(key = "end") { Gap(24) }
         }
-        if (upNext.isNotEmpty()) {
-            SectionLabel("Later on CH ${lineup.label(video.channelTitle)}", Modifier.padding(horizontal = 20.dp))
-            for (v in upNext) UpNextRow(v, thumbUrl(v), null) { onOpen(v) }
-        }
-        if (alsoOnAir.isNotEmpty()) {
-            SectionLabel("Also on air", Modifier.padding(horizontal = 20.dp))
-            for (v in alsoOnAir) UpNextRow(v, thumbUrl(v), lineup.label(v.channelTitle)) { onOpen(v) }
-        }
-        Gap(24)
+        if (showComments) CommentPrompt(comments, serverUrl, canUseNetwork)
     }
 }
 
