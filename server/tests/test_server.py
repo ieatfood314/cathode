@@ -915,3 +915,32 @@ def test_web_ui_and_assets(tmp_path, monkeypatch):
     # Only the fixed list is served: no other files, no path tricks.
     assert c.get("/assets/index.html").status_code == 404
     assert c.get("/assets/..%2Fmain.py").status_code == 404
+
+
+def test_duration_is_the_files_own(tmp_path, monkeypatch):
+    """SponsorBlock cuts make the file shorter than YouTube's figure; the
+    library shows the file's length."""
+    from app import db as dbmod
+    from app import poller
+    media = tmp_path / "media"
+    media.mkdir()
+    main = media / "20240101 - T [abc123XYZ_-].mp4"
+    main.write_bytes(b"v")
+    info = media / "20240101 - T [abc123XYZ_-].info.json"
+    info.write_text('{"title": "T", "upload_date": "20240101", "duration": 1020}')
+    conn = dbmod.connect(str(tmp_path / "t.db"))
+    conn.execute("INSERT INTO videos(id,status,file_path,duration) VALUES"
+                 "('abc123XYZ_-','done',?,1020)", (main.name,))
+    conn.commit()
+    dur = lambda: conn.execute("SELECT duration FROM videos").fetchone()["duration"]
+    p = poller.Poller()
+    # A file that can't be probed keeps YouTube's length.
+    monkeypatch.setattr(poller, "file_duration", lambda path: 0)
+    p._enrich_from_info(conn, "abc123XYZ_-", info, main)
+    assert p._fix_durations(conn, media) == 0 and dur() == 1020
+    monkeypatch.setattr(poller, "file_duration", lambda path: 960)
+    assert p._fix_durations(conn, media) == 1 and dur() == 960
+    conn.execute("UPDATE videos SET duration=0")
+    p._enrich_from_info(conn, "abc123XYZ_-", info, main)
+    assert dur() == 960
+    conn.close()

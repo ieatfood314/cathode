@@ -45,6 +45,18 @@ MEDIA_EXTS = (".mp4", ".mkv", ".webm")
 THUMB_EXTS = (".jpg", ".webp", ".png")
 
 
+def file_duration(path: Path) -> int:
+    """How long a media file runs, in whole seconds (0 if it can't be read)."""
+    try:
+        proc = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "csv=p=0", str(path)],
+            capture_output=True, text=True, timeout=30)
+        return max(0, round(float(proc.stdout.strip())))
+    except Exception:  # no ffprobe, not a media file, no duration in the container
+        return 0
+
+
 def is_video_id(vid: str | None) -> bool:
     """Flat channel scans mix in channel entries (UC + 22 chars). Video ids
     are 11 chars and may themselves start with "UC", so check the length."""
@@ -134,6 +146,10 @@ class Poller:
             if dbmod.kv_get(conn, "cover_strip_done") != "1":
                 scaled = self._strip_cover_streams(conn, media_dir)
                 dbmod.kv_set(conn, "cover_strip_done", "1")
+            # One-time migration: new downloads take their length from the file.
+            if dbmod.kv_get(conn, "file_durations_done") != "1":
+                self._fix_durations(conn, media_dir)
+                dbmod.kv_set(conn, "file_durations_done", "1")
             discovered = downloaded = failed = 0
             for sub in subs:
                 try:
@@ -273,7 +289,7 @@ class Poller:
                     str(info.relative_to(media_dir)) if info else "",
                     main.stat().st_size,
                 )
-                self._enrich_from_info(conn, vid, info)
+                self._enrich_from_info(conn, vid, info, main)
                 down += 1
             else:
                 dbmod.mark_failed(conn, vid, err)
@@ -356,29 +372,56 @@ class Poller:
                 str(info.relative_to(media_dir)) if info else "",
                 main.stat().st_size if main.exists() else 0,
             )
-            self._enrich_from_info(conn, vid, info)
+            self._enrich_from_info(conn, vid, info, main)
             fixed += 1
         return fixed
 
-    def _enrich_from_info(self, conn: sqlite3.Connection, vid: str, info: Path | None):
+    def _enrich_from_info(self, conn: sqlite3.Connection, vid: str, info: Path | None,
+                          main: Path | None = None):
         """Backfill accurate metadata from yt-dlp's .info.json.
 
         Flat discovery only yields id/title, so without this every video has
         published=0 (broken feed ordering) and duration=0 (blank UI).
+
+        The length comes from the file itself when it can be read: YouTube's
+        figure is from before SponsorBlock cut anything out.
         """
-        if info is None or not info.exists():
-            return
-        try:
-            d = json.loads(info.read_text(encoding="utf-8"))
-        except Exception:
-            return
-        conn.execute(
-            "UPDATE videos SET title=COALESCE(NULLIF(title,''), ?), upload_date=?, "
-            "duration=?, published=?, description=? WHERE id=?",
-            (d.get("title"), d.get("upload_date"), d.get("duration") or 0,
-             d.get("timestamp") or 0, (d.get("description") or "")[:4000], vid),
-        )
+        d = None
+        if info is not None and info.exists():
+            try:
+                d = json.loads(info.read_text(encoding="utf-8"))
+            except Exception:
+                d = None
+        if d is not None:
+            conn.execute(
+                "UPDATE videos SET title=COALESCE(NULLIF(title,''), ?), upload_date=?, "
+                "duration=?, published=?, description=? WHERE id=?",
+                (d.get("title"), d.get("upload_date"), d.get("duration") or 0,
+                 d.get("timestamp") or 0, (d.get("description") or "")[:4000], vid),
+            )
+        actual = file_duration(main) if main is not None else 0
+        if actual:
+            conn.execute("UPDATE videos SET duration=? WHERE id=?", (actual, vid))
         conn.commit()
+
+    def _fix_durations(self, conn: sqlite3.Connection, media_dir: Path) -> int:
+        """Set every downloaded video's length to what its file really runs.
+
+        One-time pass for files downloaded before lengths were read from the
+        file: those rows hold YouTube's length, which is longer than the file
+        whenever SponsorBlock cut something. Returns the number of rows changed.
+        """
+        fixed = 0
+        rows = conn.execute(
+            "SELECT id, file_path, duration FROM videos WHERE status='done' AND file_path != ''"
+        ).fetchall()
+        for row in rows:
+            actual = file_duration(media_dir / row["file_path"])
+            if actual and actual != row["duration"]:
+                conn.execute("UPDATE videos SET duration=? WHERE id=?", (actual, row["id"]))
+                fixed += 1
+        conn.commit()
+        return fixed
 
     def _prune(self, conn: sqlite3.Connection, media_dir: Path):
         """Delete media files uploaded more than keep_days ago (0 = keep forever).
