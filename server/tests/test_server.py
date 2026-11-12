@@ -1107,3 +1107,18 @@ def test_sign_in_post_and_sign_out(tmp_path, monkeypatch):
 
     assert c.delete("/api/youtube/account").json()["signed_in"] is False
     assert not saved.exists()
+
+
+def test_feed_carries_description(tmp_path, monkeypatch):
+    """The player shows the uploader's description, offline too, so the feed carries it."""
+    from fastapi.testclient import TestClient
+    from app import db as dbmod
+    from app.main import app
+    _, db_path = _isolated(tmp_path, monkeypatch)
+    conn = dbmod.connect(db_path)
+    conn.execute("INSERT INTO videos(id,status,file_path,description) "
+                 "VALUES('desc0000001','done','a.mp4','Links below\nmore')")
+    conn.commit()
+    conn.close()
+    v = TestClient(app).get("/api/feed").json()["videos"][0]
+    assert v["description"] == "Links below\nmore"

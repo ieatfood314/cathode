@@ -16,7 +16,7 @@ android {
         // CI overrides the code per-build so every main push yields a newer
         // install than the last, without touching this file.
         versionCode = System.getenv("CATHODE_VERSION_CODE")?.toIntOrNull() ?: 28
-        versionName = System.getenv("CATHODE_VERSION_NAME") ?: "0.10.0"
+        versionName = System.getenv("CATHODE_VERSION_NAME") ?: "0.10.1"
     }
 
     buildTypes {

@@ -546,6 +546,7 @@ function renderWatch(id) {
     (v.duration ? '<span class="chip">' + fmtDur(v.duration) + '</span>' : '') +
     (fmtAgo(v) ? '<span class="chip">' + esc(fmtAgo(v)) + '</span>' : '') +
     (v.watched ? '<span class="rev">SEEN</span>' : '') + '</div>' +
+    (v.description ? '<div class="desc">' + esc(v.description) + '</div>' : '') +
     '<div class="acts"><button class="btn" data-act="seen">' + (v.watched ? 'Mark unwatched' : 'Mark watched') + '</button></div>' +
     '<div class="tabs"><button data-tab="next">Up next</button><button data-tab="comments">Comments</button></div>' +
     '<div id="tabBody"></div></aside></div>';
@@ -564,6 +565,9 @@ function renderWatch(id) {
   start(v);
   $('[data-act=close]', view).onclick = closeVideo;
   $('[data-act=seen]', view).onclick = () => setWatched(v, !v.watched);
+  // Long descriptions are cut short until clicked, like comments.
+  const desc = $('.desc', view);
+  if (desc && desc.scrollHeight > desc.clientHeight + 2) { desc.classList.add('cut'); desc.onclick = () => desc.classList.toggle('all'); }
   drawTab();
   // Fetched as the video starts, so the list is there when you look.
   loadComments(v);

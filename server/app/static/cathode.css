@@ -194,6 +194,10 @@ main { padding: 0 var(--pad) calc(40px + var(--nav-h)); max-width: 1320px; margi
 .prog-card h1 { margin: 4px 0 12px; font-weight: normal; font-size: clamp(32px, 3.4vw, 44px); line-height: 1; }
 .chips { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; font-size: 21px; }
 .chip { border: 1px solid var(--p40); padding: 0 7px; }
+.desc { margin-top: 14px; font-size: 21px; line-height: 1.12; color: var(--p60); white-space: pre-wrap; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+.desc.cut { cursor: pointer; }
+.desc.all { display: block; color: var(--p80); }
 .acts { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; }
 .next { display: flex; gap: 14px; align-items: center; padding: 7px 0; cursor: pointer; }
 .next:hover .nt { color: var(--p100); }

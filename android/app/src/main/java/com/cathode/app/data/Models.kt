@@ -21,6 +21,7 @@ data class Video(
     /** Epoch seconds it was marked watched; 0 = not watched, or marked before this existed. */
     @SerialName("watched_at") val watchedAt: Long = 0,
     @SerialName("position_seconds") val positionSeconds: Int = 0,
+    val description: String = "",
 )
 
 @Serializable

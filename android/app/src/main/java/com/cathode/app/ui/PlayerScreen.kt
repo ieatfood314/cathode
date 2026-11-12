@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
@@ -350,6 +351,10 @@ private fun ProgramCard(
                             onPhone -> Reverse("ON PHONE", size = 20.sp)
                         }
                     }
+                    if (video.description.isNotBlank()) {
+                        Gap(12)
+                        Description(video)
+                    }
                     Gap(18)
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         BlockTab("Up next", !showComments, size = 22.sp) { showComments = false }
@@ -379,6 +384,23 @@ private fun ProgramCard(
         }
         if (showComments) CommentPrompt(comments, serverUrl, canUseNetwork)
     }
+}
+
+/** The uploader's description, cut to a few lines until tapped. */
+@Composable
+private fun Description(video: Video) {
+    var whole by remember(video.id) { mutableStateOf(false) }
+    var cut by remember(video.id) { mutableStateOf(false) }
+    Text(
+        video.description.trim(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(if (cut || whole) Modifier.clickable { whole = !whole } else Modifier),
+        style = TextStyle(fontFamily = Vt, fontSize = 21.sp, lineHeight = 23.sp, color = if (whole) P80 else P60),
+        maxLines = if (whole) Int.MAX_VALUE else 4,
+        overflow = TextOverflow.Ellipsis,
+        onTextLayout = { if (!whole) cut = it.hasVisualOverflow },
+    )
 }
 
 @Composable

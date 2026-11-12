@@ -64,7 +64,8 @@ def feed(limit: int = Query(100, le=5000), unwatched_only: bool = False,
     conn = _conn()
     q = ("SELECT id, channel_id, channel_title, title, upload_date, duration, "
          "file_path, thumb_path, filesize, status, published, downloaded_at, watched, "
-         "watched_at, CAST(position_seconds AS INTEGER) AS position_seconds "
+         "watched_at, CAST(position_seconds AS INTEGER) AS position_seconds, "
+         "COALESCE(description, '') AS description "
          # A done row without a file has nothing to play: never list it.
          "FROM videos WHERE status='done' AND file_path IS NOT NULL AND file_path != ''")
     args: list = []
